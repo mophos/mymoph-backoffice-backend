@@ -1,0 +1,26 @@
+SET NAMES utf8mb4;
+
+CREATE TABLE IF NOT EXISTS organizations (
+  hospcode VARCHAR(10) PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  province_code VARCHAR(10) NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS personnel_profiles (
+  id CHAR(36) PRIMARY KEY,
+  cid VARCHAR(13) NOT NULL,
+  first_name VARCHAR(100) NOT NULL,
+  last_name VARCHAR(100) NOT NULL,
+  hospcode VARCHAR(10) NOT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_by CHAR(36) NULL,
+  updated_by CHAR(36) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_personnel_cid_hospcode (cid, hospcode),
+  KEY idx_personnel_hospcode (hospcode),
+  KEY idx_personnel_name (first_name, last_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
