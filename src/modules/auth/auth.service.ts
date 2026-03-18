@@ -5,7 +5,7 @@ import { SUPER_ADMIN_ROLE } from '../../shared/constants/permissions';
 import { MenuService } from '../menu/menu.service';
 import { JwtService } from '../../shared/services/jwt.service';
 import { OAuthClientService } from '../../shared/services/oauth-client.service';
-import { codeChallengeS256, randomToken, sha256 } from '../../shared/utils/crypto';
+import { codeChallengeS256, randomToken, randomDigits, sha256 } from '../../shared/utils/crypto';
 import type { AuthContext, OAuthUserInfo } from '../../shared/types/auth';
 import { AuthModel } from './auth.model';
 
@@ -24,7 +24,7 @@ export class AuthService {
   constructor(private readonly authModel: AuthModel) { }
 
   getLoginUrl(returnTo?: string) {
-    const state = randomToken(16);
+    const state = randomDigits(10);
     const codeVerifier = randomToken(32);
     const codeChallenge = codeChallengeS256(codeVerifier);
     const authorizationUrl = this.oauthClient.buildAuthorizeUrl(state, codeChallenge);
