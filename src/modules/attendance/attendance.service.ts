@@ -1,11 +1,13 @@
 import type { AuthContext } from '../../shared/types/auth';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
 import ExcelJS from 'exceljs';
 import { existsSync } from 'node:fs';
 import { config } from '../../config/env';
 import { AttendanceModel } from './attendance.model';
 
 const PDFDocument: any = require('pdfkit');
+dayjs.extend(utc);
 
 interface DashboardQuery {
   from: string;
@@ -153,11 +155,11 @@ export class AttendanceService {
   private maskCid(value: unknown): string {
     const cid = String(value ?? '').trim();
     if (!cid) return '';
-    if (cid.length <= 8) return cid;
+    if (cid.length <= 7) return cid;
 
-    const head = cid.slice(0, 8);
+    const head = cid.slice(0, 7);
     const tail = cid.length > 12 ? cid.slice(12) : '';
-    return `${head}***${tail}`;
+    return `${head}*****${tail}`;
   }
 
   private buildExportFilename(reportType: 'daily' | 'monthly', from: string, to: string): string {
@@ -295,12 +297,12 @@ export class AttendanceService {
 
   private formatDate(value: unknown): string {
     if (!value) return '';
-    return dayjs(value as any).format('DD/MM/YYYY');
+    return dayjs.utc(value as any).format('DD/MM/YYYY');
   }
 
   private formatTime(value: unknown): string {
     if (!value) return '-';
-    return dayjs(value as any).format('HH:mm');
+    return dayjs.utc(value as any).format('HH:mm');
   }
 
   private getStatus(checkInAt: unknown, checkOutAt: unknown): string {
@@ -312,8 +314,8 @@ export class AttendanceService {
   private formatWorkDuration(checkInAt: unknown, checkOutAt: unknown): string {
     if (!checkInAt || !checkOutAt) return '-';
 
-    const start = dayjs(checkInAt as any);
-    const end = dayjs(checkOutAt as any);
+    const start = dayjs.utc(checkInAt as any);
+    const end = dayjs.utc(checkOutAt as any);
     const totalMinutes = end.diff(start, 'minute');
 
     if (!Number.isFinite(totalMinutes) || totalMinutes < 0) return '-';
@@ -428,7 +430,7 @@ export class AttendanceService {
 
   private toDateKey(value: unknown): string | null {
     if (!value) return null;
-    const parsed = dayjs(value as any);
+    const parsed = dayjs.utc(value as any);
     if (!parsed.isValid()) return null;
     return parsed.format('YYYY-MM-DD');
   }
@@ -599,7 +601,7 @@ export class AttendanceService {
   private groupRowsByDate(rows: any[]): Map<string, any[]> {
     const map = new Map<string, any[]>();
     for (const row of rows) {
-      const key = dayjs(row.attendance_date).format('YYYY-MM-DD');
+      const key = dayjs.utc(row.attendance_date).format('YYYY-MM-DD');
       const current = map.get(key) ?? [];
       current.push(row);
       map.set(key, current);
@@ -658,9 +660,9 @@ export class AttendanceService {
     }>();
 
     for (const row of rows) {
-      const dateKey = dayjs(row.attendance_date).format('YYYY-MM-DD');
+      const dateKey = dayjs.utc(row.attendance_date).format('YYYY-MM-DD');
       const existing = map.get(dateKey) ?? {
-        dateLabel: dayjs(row.attendance_date).format('DD/MM/YYYY'),
+        dateLabel: dayjs.utc(row.attendance_date).format('DD/MM/YYYY'),
         totalRecords: 0,
         checkedInCount: 0,
         checkedOutCount: 0
