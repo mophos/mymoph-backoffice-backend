@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { mymophDb } from '../../db/knex';
+import { systemDb } from '../../db/knex';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { auditMiddleware } from '../../middleware/audit.middleware';
 import { requirePermission } from '../../middleware/permission.middleware';
@@ -8,7 +8,7 @@ import { PayrollModel } from './payroll.model';
 import { PayrollService } from './payroll.service';
 
 const router = Router();
-const payrollService = new PayrollService(new PayrollModel(mymophDb));
+const payrollService = new PayrollService(new PayrollModel(systemDb));
 
 router.get(
   '/summary',

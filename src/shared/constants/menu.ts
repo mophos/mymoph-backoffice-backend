@@ -34,6 +34,14 @@ export const MENU_CATALOG: MenuItem[] = [
     requiredPermissions: ['payroll.read']
   },
   {
+    id: 'tax',
+    label: 'ใบรับรองภาษี (Tax)',
+    icon: 'payments',
+    path: '/tax',
+    module: 'tax',
+    requiredPermissions: ['payroll.read']
+  },
+  {
     id: 'office-settings',
     label: 'Office Settings',
     icon: 'settings',

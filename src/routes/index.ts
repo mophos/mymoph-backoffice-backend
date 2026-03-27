@@ -4,6 +4,7 @@ import { menuRoutes } from '../modules/menu/menu.routes';
 import { attendanceRoutes } from '../modules/attendance/attendance.routes';
 import { personnelRoutes } from '../modules/personnel/personnel.routes';
 import { payrollRoutes } from '../modules/payroll/payroll.routes';
+import { taxRoutes } from '../modules/tax/tax.routes';
 import { officeSettingsRoutes } from '../modules/office-settings/office-settings.routes';
 import { userRoleManagementRoutes } from '../modules/user-role-management/user-role-management.routes';
 
@@ -18,6 +19,7 @@ router.use('/menu', menuRoutes);
 router.use('/attendance', attendanceRoutes);
 router.use('/personnel', personnelRoutes);
 router.use('/payroll', payrollRoutes);
+router.use('/tax', taxRoutes);
 router.use('/office-settings', officeSettingsRoutes);
 router.use('/admin', userRoleManagementRoutes);
 

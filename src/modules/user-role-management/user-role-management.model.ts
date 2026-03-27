@@ -47,10 +47,37 @@ export class UserRoleManagementModel {
       });
     }
 
-    const [{ total }] = await base.clone().count<{ total: number }[]>({ total: '*' });
+    const [{ total }] = await base.clone().countDistinct<{ total: number }[]>({ total: 'ur.user_id' });
 
-    const rows = await base
+    const userRows = await base
       .clone()
+      .select('ur.user_id')
+      .max<{ user_id: string; latest_assigned_at: string }[]>({ latest_assigned_at: 'ur.created_at' })
+      .groupBy('ur.user_id')
+      .orderBy('latest_assigned_at', 'desc')
+      .limit(input.pageSize)
+      .offset(input.offset);
+
+    const userIds = userRows.map((row) => String(row.user_id));
+    if (!userIds.length) {
+      return {
+        total: Number(total ?? 0),
+        rows: []
+      };
+    }
+
+    const rows = await this.db('user_roles as ur')
+      .innerJoin('users as u', 'u.id', 'ur.user_id')
+      .innerJoin('roles as r', 'r.id', 'ur.role_id')
+      .where('ur.is_active', 1)
+      .where('u.is_active', 1)
+      .where('r.is_active', 1)
+      .whereIn('ur.user_id', userIds)
+      .modify((queryBuilder) => {
+        if (input.roleCode) {
+          queryBuilder.andWhere('r.code', input.roleCode);
+        }
+      })
       .select(
         'u.id as user_id',
         'u.cid',
@@ -61,11 +88,8 @@ export class UserRoleManagementModel {
         'r.name as role_name',
         'ur.created_at as assigned_at'
       )
-      .orderBy('ur.created_at', 'desc')
-      .limit(input.pageSize)
-      .offset(input.offset);
+      .orderBy('ur.created_at', 'desc');
 
-    const userIds = rows.map((row) => row.user_id);
     const scopeRows = userIds.length
       ? await this.db('user_office_scope')
           .select('user_id', 'hospcode')
@@ -80,10 +104,61 @@ export class UserRoleManagementModel {
       scopeMap.set(row.user_id, list);
     }
 
-    const normalized = rows.map((row) => ({
-      ...row,
-      hospcodes: scopeMap.get(row.user_id) ?? []
-    }));
+    const grouped = new Map<
+      string,
+      {
+        user_id: string;
+        cid: string;
+        first_name: string | null;
+        last_name: string | null;
+        email: string | null;
+        role_codes: string[];
+        hospcodes: string[];
+        latest_assigned_at: string;
+      }
+    >();
+
+    for (const row of rows) {
+      const userId = String(row.user_id);
+      const current = grouped.get(userId) ?? {
+        user_id: userId,
+        cid: String(row.cid ?? ''),
+        first_name: row.first_name ?? null,
+        last_name: row.last_name ?? null,
+        email: row.email ?? null,
+        role_codes: [] as string[],
+        hospcodes: (scopeMap.get(userId) ?? []) as string[],
+        latest_assigned_at: String(row.assigned_at ?? '')
+      };
+
+      const roleCode = String(row.role_code ?? '').trim();
+      if (roleCode && !current.role_codes.includes(roleCode)) {
+        current.role_codes.push(roleCode);
+      }
+
+      if (String(row.assigned_at ?? '') > current.latest_assigned_at) {
+        current.latest_assigned_at = String(row.assigned_at ?? '');
+      }
+
+      grouped.set(userId, current);
+    }
+
+    const userOrder = new Map<string, number>();
+    userIds.forEach((userId, index) => {
+      userOrder.set(userId, index);
+    });
+
+    const normalized = [...grouped.values()]
+      .sort((left, right) => (userOrder.get(left.user_id) ?? 0) - (userOrder.get(right.user_id) ?? 0))
+      .map((item) => ({
+        user_id: item.user_id,
+        cid: item.cid,
+        first_name: item.first_name,
+        last_name: item.last_name,
+        email: item.email,
+        role_codes: item.role_codes,
+        hospcodes: item.hospcodes
+      }));
 
     return {
       total: Number(total ?? 0),

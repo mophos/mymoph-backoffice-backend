@@ -31,3 +31,7 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+
+# generated uploads / documents
+storage/
+*.pdf
