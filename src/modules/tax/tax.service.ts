@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import { StatusCodes } from 'http-status-codes';
 import { PDFDocument } from 'pdf-lib';
 import type { AuthContext } from '../../shared/types/auth';
-import { TaxModel, type InsertTaxDocumentRow } from './tax.model';
+import { TaxModel, type InsertTaxDocumentDeleteLogRow, type InsertTaxDocumentRow } from './tax.model';
 
 interface PaginationQuery {
   search?: string;
@@ -151,15 +151,14 @@ export class TaxService {
     const scopeValidation = this.validateScope(auth, String(year.hospcode));
     if (!scopeValidation.ok) return scopeValidation;
 
-    const documentPaths = await this.model.listDocumentPathsByYearId(yearId);
-    await this.model.softDeleteYearAndDocuments(yearId, auth.userId);
+    const documentPaths = await this.model.hardDeleteYearDocumentsAndDeactivateYear(yearId, auth.userId);
 
     await Promise.all(
-      documentPaths.map(async (row: any) => {
-        const relativePath = String(row.relative_path || '');
-        if (!relativePath) return;
+      documentPaths.map(async (relativePath) => {
+        const normalizedRelativePath = String(relativePath || '');
+        if (!normalizedRelativePath) return;
 
-        const filePath = this.resolveStoragePath(relativePath);
+        const filePath = this.resolveStoragePath(normalizedRelativePath);
         await this.removeFileIfExists(filePath);
       })
     );
@@ -458,7 +457,22 @@ export class TaxService {
     const scopeValidation = this.validateScope(auth, hospcode);
     if (!scopeValidation.ok) return scopeValidation;
 
-    await this.model.softDeleteDocument(documentId, auth.userId);
+    const logInput: InsertTaxDocumentDeleteLogRow = {
+      documentId: String(doc.id),
+      taxYearId: Number(doc.tax_year_id),
+      yearBe: Number(doc.year_be),
+      hospcode,
+      cid: String(doc.cid),
+      fileNo: Number(doc.file_no),
+      fileName: String(doc.file_name),
+      originalFileName: doc.original_file_name ? String(doc.original_file_name) : null,
+      relativePath: String(doc.relative_path),
+      sourceType: String(doc.source_type) === 'batch' ? 'batch' : 'single',
+      deletedBy: auth.userId,
+      deleteReason: 'document_delete'
+    };
+
+    await this.model.hardDeleteDocumentWithLog(logInput);
 
     const absolutePath = this.resolveStoragePath(String(doc.relative_path));
     await this.removeFileIfExists(absolutePath);

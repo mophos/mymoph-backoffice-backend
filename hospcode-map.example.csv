@@ -1,0 +1,5 @@
+pattern,hospcode
+# wildcard * is supported
+AA0000002*,41227
+AA0000003*,41000
+AA0000010*,20190
