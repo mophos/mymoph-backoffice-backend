@@ -18,10 +18,17 @@ const asyncHandler = (handler: (req: Request, res: Response, next: NextFunction)
   };
 };
 
-const upload = multer({
+const uploadIndividual = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: 30 * 1024 * 1024
+  }
+});
+
+const uploadBatch = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 200 * 1024 * 1024
   }
 });
 
@@ -153,7 +160,7 @@ router.post(
   authMiddleware,
   requirePermission('payroll.export'),
   requireAssignedScopeMiddleware,
-  upload.array('files', 200),
+  uploadIndividual.array('files', 200),
   auditMiddleware('tax', 'preview_upload_individual'),
   asyncHandler(async (req, res) => {
     const yearId = Number(req.params.yearId);
@@ -203,7 +210,7 @@ router.post(
   authMiddleware,
   requirePermission('payroll.export'),
   requireAssignedScopeMiddleware,
-  upload.array('files', 200),
+  uploadIndividual.array('files', 200),
   auditMiddleware('tax', 'upload_individual'),
   asyncHandler(async (req, res) => {
     const yearId = Number(req.params.yearId);
@@ -253,7 +260,7 @@ router.post(
   authMiddleware,
   requirePermission('payroll.export'),
   requireAssignedScopeMiddleware,
-  upload.fields([
+  uploadBatch.fields([
     { name: 'pdf', maxCount: 1 },
     { name: 'txt', maxCount: 1 }
   ]),
@@ -299,7 +306,7 @@ router.post(
   authMiddleware,
   requirePermission('payroll.export'),
   requireAssignedScopeMiddleware,
-  upload.fields([
+  uploadBatch.fields([
     { name: 'pdf', maxCount: 1 },
     { name: 'txt', maxCount: 1 }
   ]),
