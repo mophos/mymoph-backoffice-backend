@@ -12,6 +12,7 @@ import { TaxService } from './tax.service';
 
 const router = Router();
 const service = new TaxService(new TaxModel(systemDb));
+const TAX_UPLOAD_MAX_FILE_SIZE = 300 * 1024 * 1024; // 300MB
 const asyncHandler = (handler: (req: Request, res: Response, next: NextFunction) => Promise<void>) => {
   return (req: Request, res: Response, next: NextFunction) => {
     Promise.resolve(handler(req, res, next)).catch(next);
@@ -21,14 +22,14 @@ const asyncHandler = (handler: (req: Request, res: Response, next: NextFunction)
 const uploadIndividual = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 30 * 1024 * 1024
+    fileSize: TAX_UPLOAD_MAX_FILE_SIZE
   }
 });
 
 const uploadBatch = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 200 * 1024 * 1024
+    fileSize: TAX_UPLOAD_MAX_FILE_SIZE
   }
 });
 
