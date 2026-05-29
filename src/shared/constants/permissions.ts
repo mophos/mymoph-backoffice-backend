@@ -5,6 +5,7 @@ export const PERMISSIONS: PermissionCode[] = [
   'attendance.export',
   'personnel.read',
   'personnel.manage',
+  'finance_admin.manage',
   'payroll.read',
   'payroll.export',
   'office_settings.read',

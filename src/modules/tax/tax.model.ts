@@ -33,12 +33,20 @@ export interface TaxDocumentRow {
 interface ListYearsInput {
   scopeType: 'ALL' | 'LIST';
   hospcodes: string[];
+  hospcodeSearch?: string;
 }
 
 interface ListDocumentsInput {
   yearId: number;
   scopeType: 'ALL' | 'LIST';
   hospcodes: string[];
+  search?: string;
+  pageSize: number;
+  offset: number;
+}
+
+interface ListYearlyPeopleOverviewInput {
+  yearBe: number;
   search?: string;
   pageSize: number;
   offset: number;
@@ -131,6 +139,10 @@ export class TaxModel {
 
     if (input.scopeType === 'LIST') {
       query.whereIn('y.hospcode', input.hospcodes.length ? input.hospcodes : ['']);
+    }
+
+    if (input.hospcodeSearch) {
+      query.andWhere('y.hospcode', 'like', `%${input.hospcodeSearch}%`);
     }
 
     return query;
@@ -290,6 +302,45 @@ export class TaxModel {
 
     return {
       total: Number(total ?? 0),
+      rows
+    };
+  }
+
+  async listYearlyPeopleOverview(input: ListYearlyPeopleOverviewInput) {
+    const base = this.db(`${TAX_DOCUMENTS_TABLE} as d`)
+      .where('d.is_active', 1)
+      .andWhere('d.year_be', input.yearBe);
+
+    if (input.search) {
+      base.andWhere((qb) => {
+        qb.where('d.cid', 'like', `%${input.search}%`)
+          .orWhere('d.hospcode', 'like', `%${input.search}%`)
+          .orWhere('d.file_name', 'like', `%${input.search}%`);
+      });
+    }
+
+    const totalResult = await base
+      .clone()
+      .countDistinct<{ total: number }[]>({ total: 'd.cid' });
+    const total = Number(totalResult?.[0]?.total ?? 0);
+
+    const rows = await base
+      .clone()
+      .select(
+        'd.cid',
+        this.db.raw('COUNT(*) as total_files'),
+        this.db.raw('COUNT(DISTINCT d.hospcode) as hospcode_count'),
+        this.db.raw("GROUP_CONCAT(DISTINCT d.hospcode ORDER BY d.hospcode SEPARATOR ', ') as hospcodes"),
+        this.db.raw('MAX(d.updated_at) as updated_at')
+      )
+      .groupBy('d.cid')
+      .orderByRaw('COUNT(*) DESC')
+      .orderBy('d.cid', 'asc')
+      .limit(input.pageSize)
+      .offset(input.offset);
+
+    return {
+      total,
       rows
     };
   }

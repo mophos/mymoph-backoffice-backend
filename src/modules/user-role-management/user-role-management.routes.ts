@@ -30,6 +30,11 @@ const upsertSchema = z.object({
   };
 });
 
+const financeUpsertSchema = z.object({
+  cid: z.string().min(13).max(13),
+  hospcodes: z.array(z.string().min(1)).default([])
+});
+
 router.get(
   '/hr-office-admins',
   authMiddleware,
@@ -95,6 +100,83 @@ router.delete(
   async (req, res) => {
     const roleCode = req.query.roleCode ? String(req.query.roleCode) : undefined;
     const result = await service.deactivate(req.auth!, req.params.userId, roleCode);
+
+    if (!result.ok) {
+      res.status(Number(result.status ?? 400)).json(result);
+      return;
+    }
+
+    res.status(Number(result.status ?? 200)).json(result);
+  }
+);
+
+router.get(
+  '/finance-office-admins',
+  authMiddleware,
+  requirePermission('finance_admin.manage'),
+  requireAssignedScopeMiddleware,
+  auditMiddleware('user-role-management', 'list_finance_admins'),
+  async (req, res) => {
+    const pagination = parsePagination(req.query as Record<string, unknown>);
+    const result = await service.listFinanceAdmins(req.auth!, {
+      search: req.query.search ? String(req.query.search) : undefined,
+      ...pagination
+    });
+
+    if (!result.ok) {
+      res.status(Number(result.status ?? 400)).json(result);
+      return;
+    }
+
+    res.json({ ok: true, data: result.data });
+  }
+);
+
+router.post(
+  '/finance-office-admins',
+  authMiddleware,
+  requirePermission('finance_admin.manage'),
+  requireAssignedScopeMiddleware,
+  auditMiddleware('user-role-management', 'create_finance_admin'),
+  async (req, res) => {
+    const payload = financeUpsertSchema.parse(req.body);
+    const result = await service.createFinanceAdmin(req.auth!, payload);
+    if (!result.ok) {
+      res.status(Number(result.status ?? 400)).json(result);
+      return;
+    }
+
+    res.status(Number(result.status ?? 201)).json(result);
+  }
+);
+
+router.put(
+  '/finance-office-admins/:userId',
+  authMiddleware,
+  requirePermission('finance_admin.manage'),
+  requireAssignedScopeMiddleware,
+  auditMiddleware('user-role-management', 'update_finance_admin'),
+  async (req, res) => {
+    const payload = financeUpsertSchema.parse(req.body);
+    const result = await service.updateFinanceAdmin(req.auth!, req.params.userId, payload);
+
+    if (!result.ok) {
+      res.status(Number(result.status ?? 400)).json(result);
+      return;
+    }
+
+    res.status(Number(result.status ?? 200)).json(result);
+  }
+);
+
+router.delete(
+  '/finance-office-admins/:userId',
+  authMiddleware,
+  requirePermission('finance_admin.manage'),
+  requireAssignedScopeMiddleware,
+  auditMiddleware('user-role-management', 'deactivate_finance_admin'),
+  async (req, res) => {
+    const result = await service.deactivateFinanceAdmin(req.auth!, req.params.userId);
 
     if (!result.ok) {
       res.status(Number(result.status ?? 400)).json(result);

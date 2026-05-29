@@ -18,6 +18,14 @@ export const MENU_CATALOG: MenuItem[] = [
     requiredPermissions: ['user_admin.manage']
   },
   {
+    id: 'finance-office-admin',
+    label: 'Finance Office Admin',
+    icon: 'manage_accounts',
+    path: '/finance-admin',
+    module: 'user-role-management',
+    requiredPermissions: ['finance_admin.manage']
+  },
+  {
     id: 'personnel',
     label: 'ข้อมูลบุคลากร',
     icon: 'group',

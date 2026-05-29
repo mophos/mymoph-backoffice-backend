@@ -60,7 +60,8 @@ router.get(
   requireAssignedScopeMiddleware,
   auditMiddleware('tax', 'list_years'),
   asyncHandler(async (req, res) => {
-    const data = await service.listYears(req.auth!);
+    const hospcodeSearch = req.query.hospcode ? String(req.query.hospcode).trim() : undefined;
+    const data = await service.listYears(req.auth!, { hospcodeSearch });
     res.json({ ok: true, data });
   })
 );
@@ -125,6 +126,34 @@ router.delete(
     }
 
     res.status(Number(result.status ?? 200)).json(result);
+  })
+);
+
+router.get(
+  '/years/:yearId/yearly-overview',
+  authMiddleware,
+  requirePermission('payroll.read'),
+  requireAssignedScopeMiddleware,
+  auditMiddleware('tax', 'list_yearly_people_overview'),
+  asyncHandler(async (req, res) => {
+    const yearId = Number(req.params.yearId);
+    if (!Number.isInteger(yearId) || yearId <= 0) {
+      res.status(400).json({ ok: false, error: 'INVALID_YEAR_ID' });
+      return;
+    }
+
+    const pagination = parsePagination(req.query as Record<string, unknown>);
+    const result = await service.listYearlyPeopleOverview(req.auth!, yearId, {
+      search: req.query.search ? String(req.query.search) : undefined,
+      ...pagination
+    });
+
+    if (!result.ok) {
+      res.status(Number(result.status ?? 400)).json(result);
+      return;
+    }
+
+    res.json(result);
   })
 );
 

@@ -12,6 +12,10 @@ interface PaginationQuery {
   offset: number;
 }
 
+interface ListYearsQuery {
+  hospcodeSearch?: string;
+}
+
 interface YearInput {
   yearBe: number;
   hospcode?: string;
@@ -51,10 +55,13 @@ const STORAGE_ROOT = path.resolve(process.cwd(), 'storage', 'tax');
 export class TaxService {
   constructor(private readonly model: TaxModel) {}
 
-  async listYears(auth: AuthContext) {
+  async listYears(auth: AuthContext, query?: ListYearsQuery) {
+    const hospcodeSearch = String(query?.hospcodeSearch ?? '').trim();
+
     const rows = await this.model.listYears({
       scopeType: auth.scopeType,
-      hospcodes: auth.hospcodes
+      hospcodes: auth.hospcodes,
+      hospcodeSearch: hospcodeSearch || undefined
     });
 
     return rows.map((row: any) => ({
@@ -383,6 +390,46 @@ export class TaxService {
           cid: item.cid,
           fileNo: item.fileNo,
           fileName: item.fileName
+        }))
+      }
+    };
+  }
+
+  async listYearlyPeopleOverview(auth: AuthContext, yearId: number, query: PaginationQuery) {
+    if (!this.canViewYearlyPeopleOverview(auth)) {
+      return { ok: false, status: StatusCodes.FORBIDDEN, error: 'FORBIDDEN' };
+    }
+
+    const year = await this.model.findYearById(yearId);
+    if (!year || Number(year.is_active) !== 1) {
+      return { ok: false, status: StatusCodes.NOT_FOUND, error: 'TAX_YEAR_NOT_FOUND' };
+    }
+
+    const data = await this.model.listYearlyPeopleOverview({
+      yearBe: Number(year.year_be),
+      search: query.search,
+      pageSize: query.pageSize,
+      offset: query.offset
+    });
+
+    return {
+      ok: true,
+      status: StatusCodes.OK,
+      data: {
+        year: {
+          id: Number(year.id),
+          yearBe: Number(year.year_be),
+          yearShort: this.toYearShort(Number(year.year_be))
+        },
+        total: data.total,
+        page: query.page,
+        pageSize: query.pageSize,
+        rows: data.rows.map((row: any) => ({
+          cid: String(row.cid),
+          totalFiles: Number(row.total_files ?? 0),
+          hospcodeCount: Number(row.hospcode_count ?? 0),
+          hospcodes: String(row.hospcodes ?? ''),
+          updatedAt: row.updated_at
         }))
       }
     };
@@ -784,5 +831,9 @@ export class TaxService {
 
   private toYearShort(yearBe: number) {
     return String(yearBe % 100).padStart(2, '0');
+  }
+
+  private canViewYearlyPeopleOverview(auth: AuthContext) {
+    return auth.roles.includes('super_admin') || auth.roles.includes('super_admin_affairs');
   }
 }

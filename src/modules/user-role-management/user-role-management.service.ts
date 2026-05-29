@@ -8,6 +8,9 @@ interface AdminUpsertInput {
   hospcodes: string[];
 }
 
+const FINANCE_ADMIN_ROLE_CODE = 'admin_affairs';
+const FINANCE_PAGE_REQUIRED_ROLE = 'super_admin_affairs';
+
 export class UserRoleManagementService {
   constructor(private readonly model: UserRoleManagementModel) {}
 
@@ -138,6 +141,141 @@ export class UserRoleManagementService {
     return { ok: true, status: StatusCodes.OK };
   }
 
+  async listFinanceAdmins(actor: AuthContext, query: {
+    search?: string;
+    page: number;
+    pageSize: number;
+    offset: number;
+  }) {
+    if (!this.hasFinanceAdminAccess(actor)) {
+      return { ok: false, status: StatusCodes.FORBIDDEN, error: 'FORBIDDEN' };
+    }
+
+    const data = await this.model.listHrOfficeAdmins({
+      ...query,
+      roleCode: FINANCE_ADMIN_ROLE_CODE,
+      actorScopeType: actor.scopeType,
+      actorHospcodes: actor.hospcodes
+    });
+
+    return { ok: true, status: StatusCodes.OK, data };
+  }
+
+  async createFinanceAdmin(actor: AuthContext, input: { cid: string; hospcodes: string[] }) {
+    if (!this.hasFinanceAdminAccess(actor)) {
+      return { ok: false, status: StatusCodes.FORBIDDEN, error: 'FORBIDDEN' };
+    }
+
+    const validation = this.validateScope(actor, input.hospcodes, [FINANCE_ADMIN_ROLE_CODE]);
+    if (!validation.ok) return validation;
+
+    const missingHospcodes = await this.findMissingHospcodes(input.hospcodes);
+    if (missingHospcodes.length) {
+      return {
+        ok: false,
+        status: StatusCodes.BAD_REQUEST,
+        error: 'INVALID_HOSPCODE',
+        missingHospcodes
+      };
+    }
+
+    const role = await this.model.getRoleByCode(FINANCE_ADMIN_ROLE_CODE);
+    if (!role) {
+      return {
+        ok: false,
+        status: StatusCodes.BAD_REQUEST,
+        error: 'ROLE_NOT_FOUND',
+        missingRoleCodes: [FINANCE_ADMIN_ROLE_CODE]
+      };
+    }
+
+    const user = await this.model.upsertUserByCid({
+      cid: input.cid,
+      createdBy: actor.userId
+    });
+
+    await this.model.upsertUserRole({
+      userId: user.id,
+      roleId: String(role.id),
+      assignedBy: actor.userId
+    });
+
+    await this.model.replaceUserScopes({
+      userId: user.id,
+      hospcodes: input.hospcodes,
+      updatedBy: actor.userId
+    });
+
+    return { ok: true, status: StatusCodes.CREATED, data: { userId: user.id } };
+  }
+
+  async updateFinanceAdmin(actor: AuthContext, userId: string, input: { cid: string; hospcodes: string[] }) {
+    if (!this.hasFinanceAdminAccess(actor)) {
+      return { ok: false, status: StatusCodes.FORBIDDEN, error: 'FORBIDDEN' };
+    }
+
+    const validation = this.validateScope(actor, input.hospcodes, [FINANCE_ADMIN_ROLE_CODE]);
+    if (!validation.ok) return validation;
+
+    const missingHospcodes = await this.findMissingHospcodes(input.hospcodes);
+    if (missingHospcodes.length) {
+      return {
+        ok: false,
+        status: StatusCodes.BAD_REQUEST,
+        error: 'INVALID_HOSPCODE',
+        missingHospcodes
+      };
+    }
+
+    const user = await this.model.getUserById(userId);
+    if (!user) {
+      return { ok: false, status: StatusCodes.NOT_FOUND, error: 'USER_NOT_FOUND' };
+    }
+
+    const role = await this.model.getRoleByCode(FINANCE_ADMIN_ROLE_CODE);
+    if (!role) {
+      return {
+        ok: false,
+        status: StatusCodes.BAD_REQUEST,
+        error: 'ROLE_NOT_FOUND',
+        missingRoleCodes: [FINANCE_ADMIN_ROLE_CODE]
+      };
+    }
+
+    await this.model.upsertUserByCid({
+      cid: input.cid,
+      createdBy: actor.userId
+    });
+
+    await this.model.upsertUserRole({
+      userId,
+      roleId: String(role.id),
+      assignedBy: actor.userId
+    });
+
+    await this.model.replaceUserScopes({
+      userId,
+      hospcodes: input.hospcodes,
+      updatedBy: actor.userId
+    });
+
+    return { ok: true, status: StatusCodes.OK };
+  }
+
+  async deactivateFinanceAdmin(actor: AuthContext, userId: string) {
+    if (!this.hasFinanceAdminAccess(actor)) {
+      return { ok: false, status: StatusCodes.FORBIDDEN, error: 'FORBIDDEN' };
+    }
+
+    await this.model.deactivateUserRole({
+      userId,
+      roleCode: FINANCE_ADMIN_ROLE_CODE,
+      updatedBy: actor.userId
+    });
+
+    return { ok: true, status: StatusCodes.OK };
+  }
+
   private validateScope(actor: AuthContext, targetHospcodes: string[], roleCodes: string[]) {
     if (roleCodes.includes('super_admin') && !actor.permissions.includes('role_admin.manage')) {
       return { ok: false, status: StatusCodes.FORBIDDEN, error: 'ONLY_ROLE_ADMIN_CAN_ASSIGN_SUPER_ADMIN' };
@@ -167,5 +305,9 @@ export class UserRoleManagementService {
     const existing = await this.model.getExistingHospcodes(uniqueHospcodes);
     const existingSet = new Set(existing);
     return uniqueHospcodes.filter((hospcode) => !existingSet.has(hospcode));
+  }
+
+  private hasFinanceAdminAccess(actor: AuthContext): boolean {
+    return actor.roles.includes(FINANCE_PAGE_REQUIRED_ROLE);
   }
 }
