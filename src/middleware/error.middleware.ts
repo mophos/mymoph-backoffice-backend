@@ -16,6 +16,21 @@ export const errorMiddleware = (
   res: Response,
   _next: NextFunction
 ): void => {
+  const errorName = error instanceof Error ? error.name : '';
+  if (
+    errorName === 'MymophMongoConfigurationError' ||
+    errorName === 'MongoServerSelectionError' ||
+    errorName === 'MongoNetworkError' ||
+    errorName === 'MongoTopologyClosedError'
+  ) {
+    console.error('[dependency] MyMOPH MongoDB unavailable', errorName);
+    res.status(StatusCodes.SERVICE_UNAVAILABLE).json({
+      ok: false,
+      error: 'MYMOPH_MONGO_UNAVAILABLE'
+    });
+    return;
+  }
+
   if (error instanceof multer.MulterError) {
     if (error.code === 'LIMIT_FILE_SIZE') {
       res.status(StatusCodes.REQUEST_TOO_LONG).json({

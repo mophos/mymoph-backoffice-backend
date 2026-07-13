@@ -26,6 +26,14 @@ export const MENU_CATALOG: MenuItem[] = [
     requiredPermissions: ['finance_admin.manage']
   },
   {
+    id: 'mymoph-users',
+    label: 'User MyMOPH',
+    icon: 'person_search',
+    path: '/mymoph-users',
+    module: 'mymoph-users',
+    requiredPermissions: ['mymoph_user.read']
+  },
+  {
     id: 'personnel',
     label: 'ข้อมูลบุคลากร',
     icon: 'group',

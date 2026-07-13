@@ -27,6 +27,12 @@ const envSchema = z.object({
   MYMOPH_TABLE_PAYROLL_RUNS: z.string().default('payroll_runs'),
   MYMOPH_TABLE_CHECKIN_OFFICES: z.string().default('checkin_offices'),
 
+  MYMOPH_MONGO_URI: z.string().optional(),
+  MYMOPH_MONGO_DB_NAME: z.string().default('members'),
+  MYMOPH_MONGO_USERS_COLLECTION: z.string().default('users'),
+  MYMOPH_MONGO_USERS_REMOVE_COLLECTION: z.string().default('users_remove'),
+  MYMOPH_HR_STATUS_URL: z.string().url().default('https://api-mymoph.moph.go.th/status'),
+
   JWT_ACCESS_SECRET: z.string().min(16),
   JWT_REFRESH_SECRET: z.string().min(16),
   JWT_ACCESS_EXPIRES: z.string().default('12h'),
@@ -82,6 +88,14 @@ export const config = {
     attendanceLogs: env.MYMOPH_TABLE_ATTENDANCE_LOGS,
     payrollRuns: env.MYMOPH_TABLE_PAYROLL_RUNS,
     checkinOffices: env.MYMOPH_TABLE_CHECKIN_OFFICES
+  },
+
+  mymophMongo: {
+    uri: env.MYMOPH_MONGO_URI,
+    database: env.MYMOPH_MONGO_DB_NAME,
+    usersCollection: env.MYMOPH_MONGO_USERS_COLLECTION,
+    usersRemoveCollection: env.MYMOPH_MONGO_USERS_REMOVE_COLLECTION,
+    hrStatusUrl: env.MYMOPH_HR_STATUS_URL
   },
 
   jwt: {

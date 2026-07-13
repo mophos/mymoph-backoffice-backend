@@ -7,6 +7,7 @@ import { payrollRoutes } from '../modules/payroll/payroll.routes';
 import { taxRoutes } from '../modules/tax/tax.routes';
 import { officeSettingsRoutes } from '../modules/office-settings/office-settings.routes';
 import { userRoleManagementRoutes } from '../modules/user-role-management/user-role-management.routes';
+import { mymophUsersRoutes } from '../modules/mymoph-users/mymoph-users.routes';
 
 const router = Router();
 
@@ -22,5 +23,6 @@ router.use('/payroll', payrollRoutes);
 router.use('/tax', taxRoutes);
 router.use('/office-settings', officeSettingsRoutes);
 router.use('/admin', userRoleManagementRoutes);
+router.use('/mymoph-users', mymophUsersRoutes);
 
 export const apiV1Routes = router;
