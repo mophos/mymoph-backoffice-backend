@@ -553,6 +553,33 @@ export class TaxService {
     };
   }
 
+  async getInternalDownloadPayload(documentId: string, cid: string) {
+    const doc = await this.model.findDocumentByIdWithYear(documentId);
+    if (!doc || Number(doc.is_active) !== 1 || Number(doc.year_active) !== 1) {
+      return { ok: false, status: StatusCodes.NOT_FOUND, error: 'TAX_DOCUMENT_NOT_FOUND' } as const;
+    }
+
+    if (String(doc.cid) !== cid) {
+      return { ok: false, status: StatusCodes.NOT_FOUND, error: 'TAX_DOCUMENT_NOT_FOUND' } as const;
+    }
+
+    const absolutePath = this.resolveStoragePath(String(doc.relative_path));
+    try {
+      await fs.access(absolutePath);
+    } catch (_error) {
+      return { ok: false, status: StatusCodes.NOT_FOUND, error: 'FILE_NOT_FOUND' } as const;
+    }
+
+    return {
+      ok: true,
+      status: StatusCodes.OK,
+      data: {
+        absolutePath,
+        fileName: String(doc.file_name)
+      }
+    } as const;
+  }
+
   private async getAccessibleYear(auth: AuthContext, yearId: number) {
     const year = await this.model.findYearById(yearId);
     if (!year || Number(year.is_active) !== 1) {

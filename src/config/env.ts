@@ -43,6 +43,8 @@ const envSchema = z.object({
   COOKIE_SAME_SITE: z.enum(['lax', 'strict', 'none']).default('lax'),
   PDF_FONT_PATH: z.string().optional(),
 
+  TAX_INTERNAL_API_KEY: z.string().min(32),
+
   MYMOPH_OAUTH_AUTHORIZE_URL: z.string().url(),
   MYMOPH_OAUTH_TOKEN_URL: z.string().url(),
   MYMOPH_OAUTH_USERINFO_URL: z.string().url(),
@@ -114,6 +116,8 @@ export const config = {
   pdf: {
     fontPath: env.PDF_FONT_PATH
   },
+
+  taxInternalApiKey: env.TAX_INTERNAL_API_KEY,
 
   oauth: {
     authorizeUrl: env.MYMOPH_OAUTH_AUTHORIZE_URL,

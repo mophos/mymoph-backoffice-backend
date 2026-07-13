@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { systemDb } from '../../db/knex';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { auditMiddleware } from '../../middleware/audit.middleware';
+import { internalServiceMiddleware } from '../../middleware/internal-service.middleware';
 import { requirePermission } from '../../middleware/permission.middleware';
 import { requireAssignedScopeMiddleware } from '../../middleware/scope-required.middleware';
 import { parsePagination } from '../../shared/utils/pagination';
@@ -38,6 +39,7 @@ const yearSchema = z.object({
   hospcode: z.string().trim().min(1).max(10).optional()
 });
 const documentIdSchema = z.string().uuid();
+const internalCidSchema = z.string().regex(/^\d{13}$/);
 
 const isPdfFile = (file?: Express.Multer.File) => {
   if (!file) return false;
@@ -374,6 +376,33 @@ router.post(
     }
 
     res.status(Number(result.status ?? 201)).json(result);
+  })
+);
+
+router.get(
+  '/internal/documents/:id/file',
+  internalServiceMiddleware,
+  auditMiddleware('tax', 'internal_download_document'),
+  asyncHandler(async (req, res) => {
+    const parsedDocumentId = documentIdSchema.safeParse(req.params.id);
+    if (!parsedDocumentId.success) {
+      res.status(400).json({ ok: false, error: 'INVALID_DOCUMENT_ID' });
+      return;
+    }
+
+    const parsedCid = internalCidSchema.safeParse(req.query.cid);
+    if (!parsedCid.success) {
+      res.status(400).json({ ok: false, error: 'INVALID_CID' });
+      return;
+    }
+
+    const result = await service.getInternalDownloadPayload(parsedDocumentId.data, parsedCid.data);
+    if (!result.ok || !result.data) {
+      res.status(Number(result.status ?? 400)).json(result);
+      return;
+    }
+
+    res.download(result.data.absolutePath, result.data.fileName);
   })
 );
 
