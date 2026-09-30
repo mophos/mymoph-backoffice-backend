@@ -1,4 +1,5 @@
 import type { Knex } from 'knex';
+import { HCODE_TABLE } from '../../shared/services/hcode-bridge.service';
 import { v4 as uuidv4 } from 'uuid';
 
 const PERSONNEL_TABLE = 'personnel_profiles';
@@ -36,6 +37,35 @@ export interface PersonnelUpsertRow {
 
 export class PersonnelModel {
   constructor(private readonly db: Knex) {}
+
+  /**
+   * แปลงรหัสที่รับเข้ามา (code5 หรือ hcode9) ให้เป็นคู่รหัสตามทะเบียนกลาง
+   *
+   * รับเป็นชุดเพราะการอัปโหลด Excel มีหลายแถว ถ้าเรียกทีละแถวจะกลายเป็น N query
+   * เรียงแบบเดียวกับ HcodeBridgeService เพราะ code5 บางตัวชี้ไปหลาย hcode9
+   */
+  async resolveOfficeCodes(codes: string[]): Promise<Map<string, { code5: string | null; hcode9: string }>> {
+    const wanted = [...new Set(codes.map((code) => String(code ?? '').trim()).filter(Boolean))];
+    if (!wanted.length) return new Map();
+
+    const rows = await this.db(HCODE_TABLE)
+      .where((builder) => {
+        builder.whereIn('code5', wanted).orWhereIn('hcode9', wanted);
+      })
+      .andWhere('active', 1)
+      .orderBy([{ column: 'modified_date', order: 'desc' }])
+      .select('code5', 'hcode9');
+
+    const resolved = new Map<string, { code5: string | null; hcode9: string }>();
+    for (const row of rows) {
+      const code5 = row.code5 ? String(row.code5).trim() : '';
+      const office = { code5: code5 || null, hcode9: String(row.hcode9).trim() };
+      if (code5 && !resolved.has(code5)) resolved.set(code5, office);
+      if (!resolved.has(office.hcode9)) resolved.set(office.hcode9, office);
+    }
+
+    return new Map(wanted.filter((c) => resolved.has(c)).map((c) => [c, resolved.get(c)!]));
+  }
 
   async list(input: ListPersonnelInput) {
     const base = this.db(`${PERSONNEL_TABLE} as p`).where('p.is_active', 1);

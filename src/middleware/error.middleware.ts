@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import multer from 'multer';
+import { ZodError } from 'zod';
 
 export const notFoundMiddleware = (req: Request, res: Response): void => {
   res.status(StatusCodes.NOT_FOUND).json({
@@ -27,6 +28,20 @@ export const errorMiddleware = (
     res.status(StatusCodes.SERVICE_UNAVAILABLE).json({
       ok: false,
       error: 'MYMOPH_MONGO_UNAVAILABLE'
+    });
+    return;
+  }
+
+  // zod โผล่มาที่นี่เมื่อ handler เรียก schema.parse() ตรง ๆ
+  // เดิมตกไปเป็น 500 INTERNAL_SERVER_ERROR ทั้งที่เป็นความผิดของ payload ฝั่งผู้เรียก
+  if (error instanceof ZodError) {
+    res.status(StatusCodes.BAD_REQUEST).json({
+      ok: false,
+      error: 'INVALID_PAYLOAD',
+      details: error.issues.map((issue) => ({
+        field: issue.path.join('.') || '(body)',
+        rule: issue.code
+      }))
     });
     return;
   }

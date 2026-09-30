@@ -2,10 +2,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { systemDb } from '../../db/knex';
 import { authMiddleware } from '../../middleware/auth.middleware';
+import { asyncHandler } from '../../shared/utils/async-handler';
 import { auditMiddleware } from '../../middleware/audit.middleware';
 import { requirePermission } from '../../middleware/permission.middleware';
 import { requireAssignedScopeMiddleware } from '../../middleware/scope-required.middleware';
 import { parsePagination } from '../../shared/utils/pagination';
+import { parseBody } from '../../shared/utils/parse-body';
 import { UserRoleManagementModel } from './user-role-management.model';
 import { UserRoleManagementService } from './user-role-management.service';
 
@@ -41,7 +43,7 @@ router.get(
   requirePermission('user_admin.manage'),
   requireAssignedScopeMiddleware,
   auditMiddleware('user-role-management', 'list_hr_admins'),
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const pagination = parsePagination(req.query as Record<string, unknown>);
 
     const data = await service.list(req.auth!, {
@@ -51,7 +53,7 @@ router.get(
     });
 
     res.json({ ok: true, data });
-  }
+  })
 );
 
 router.post(
@@ -60,8 +62,9 @@ router.post(
   requirePermission('user_admin.manage'),
   requireAssignedScopeMiddleware,
   auditMiddleware('user-role-management', 'create_hr_admin'),
-  async (req, res) => {
-    const payload = upsertSchema.parse(req.body);
+  asyncHandler(async (req, res) => {
+    const payload = parseBody(upsertSchema, req.body, res, 'INVALID_USER_PAYLOAD');
+    if (!payload) return;
     const result = await service.create(req.auth!, payload);
     if (!result.ok) {
       res.status(Number(result.status ?? 400)).json(result);
@@ -69,7 +72,7 @@ router.post(
     }
 
     res.status(Number(result.status ?? 201)).json(result);
-  }
+  })
 );
 
 router.put(
@@ -78,8 +81,9 @@ router.put(
   requirePermission('user_admin.manage'),
   requireAssignedScopeMiddleware,
   auditMiddleware('user-role-management', 'update_hr_admin'),
-  async (req, res) => {
-    const payload = upsertSchema.parse(req.body);
+  asyncHandler(async (req, res) => {
+    const payload = parseBody(upsertSchema, req.body, res, 'INVALID_USER_PAYLOAD');
+    if (!payload) return;
     const result = await service.update(req.auth!, req.params.userId, payload);
 
     if (!result.ok) {
@@ -88,7 +92,7 @@ router.put(
     }
 
     res.status(Number(result.status ?? 200)).json(result);
-  }
+  })
 );
 
 router.delete(
@@ -97,7 +101,7 @@ router.delete(
   requirePermission('user_admin.manage'),
   requireAssignedScopeMiddleware,
   auditMiddleware('user-role-management', 'deactivate_hr_admin'),
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const roleCode = req.query.roleCode ? String(req.query.roleCode) : undefined;
     const result = await service.deactivate(req.auth!, req.params.userId, roleCode);
 
@@ -107,7 +111,7 @@ router.delete(
     }
 
     res.status(Number(result.status ?? 200)).json(result);
-  }
+  })
 );
 
 router.get(
@@ -116,7 +120,7 @@ router.get(
   requirePermission('finance_admin.manage'),
   requireAssignedScopeMiddleware,
   auditMiddleware('user-role-management', 'list_finance_admins'),
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const pagination = parsePagination(req.query as Record<string, unknown>);
     const result = await service.listFinanceAdmins(req.auth!, {
       search: req.query.search ? String(req.query.search) : undefined,
@@ -129,7 +133,7 @@ router.get(
     }
 
     res.json({ ok: true, data: result.data });
-  }
+  })
 );
 
 router.post(
@@ -138,8 +142,9 @@ router.post(
   requirePermission('finance_admin.manage'),
   requireAssignedScopeMiddleware,
   auditMiddleware('user-role-management', 'create_finance_admin'),
-  async (req, res) => {
-    const payload = financeUpsertSchema.parse(req.body);
+  asyncHandler(async (req, res) => {
+    const payload = parseBody(financeUpsertSchema, req.body, res, 'INVALID_USER_PAYLOAD');
+    if (!payload) return;
     const result = await service.createFinanceAdmin(req.auth!, payload);
     if (!result.ok) {
       res.status(Number(result.status ?? 400)).json(result);
@@ -147,7 +152,7 @@ router.post(
     }
 
     res.status(Number(result.status ?? 201)).json(result);
-  }
+  })
 );
 
 router.put(
@@ -156,8 +161,9 @@ router.put(
   requirePermission('finance_admin.manage'),
   requireAssignedScopeMiddleware,
   auditMiddleware('user-role-management', 'update_finance_admin'),
-  async (req, res) => {
-    const payload = financeUpsertSchema.parse(req.body);
+  asyncHandler(async (req, res) => {
+    const payload = parseBody(financeUpsertSchema, req.body, res, 'INVALID_USER_PAYLOAD');
+    if (!payload) return;
     const result = await service.updateFinanceAdmin(req.auth!, req.params.userId, payload);
 
     if (!result.ok) {
@@ -166,7 +172,7 @@ router.put(
     }
 
     res.status(Number(result.status ?? 200)).json(result);
-  }
+  })
 );
 
 router.delete(
@@ -175,7 +181,7 @@ router.delete(
   requirePermission('finance_admin.manage'),
   requireAssignedScopeMiddleware,
   auditMiddleware('user-role-management', 'deactivate_finance_admin'),
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const result = await service.deactivateFinanceAdmin(req.auth!, req.params.userId);
 
     if (!result.ok) {
@@ -184,7 +190,7 @@ router.delete(
     }
 
     res.status(Number(result.status ?? 200)).json(result);
-  }
+  })
 );
 
 export const userRoleManagementRoutes = router;

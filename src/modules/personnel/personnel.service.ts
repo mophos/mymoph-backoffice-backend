@@ -50,10 +50,10 @@ export class PersonnelService {
     const normalized = this.normalizeInput(input);
     if (!normalized.ok) return normalized;
 
-    const validation = this.validateScope(auth, normalized.hospcode);
-    if (!validation.ok) return validation;
+    const office = await this.resolveHospcode(auth, normalized.hospcode);
+    if (!office.ok) return office;
 
-    const existing = await this.model.findByCidHospcode(normalized.cid, normalized.hospcode);
+    const existing = await this.model.findByCidHospcode(normalized.cid, office.hospcode);
     if (existing) {
       return { ok: false, status: StatusCodes.CONFLICT, error: 'PERSONNEL_ALREADY_EXISTS' };
     }
@@ -62,7 +62,7 @@ export class PersonnelService {
       cid: normalized.cid,
       firstName: normalized.firstName,
       lastName: normalized.lastName,
-      hospcode: normalized.hospcode,
+      hospcode: office.hospcode,
       createdBy: auth.userId
     });
 
@@ -88,10 +88,10 @@ export class PersonnelService {
     const normalized = this.normalizeInput(merged);
     if (!normalized.ok) return normalized;
 
-    const targetScope = this.validateScope(auth, normalized.hospcode);
-    if (!targetScope.ok) return targetScope;
+    const office = await this.resolveHospcode(auth, normalized.hospcode);
+    if (!office.ok) return office;
 
-    const duplicate = await this.model.findByCidHospcode(normalized.cid, normalized.hospcode);
+    const duplicate = await this.model.findByCidHospcode(normalized.cid, office.hospcode);
     if (duplicate && String(duplicate.id) !== id) {
       return { ok: false, status: StatusCodes.CONFLICT, error: 'PERSONNEL_ALREADY_EXISTS' };
     }
@@ -100,7 +100,7 @@ export class PersonnelService {
       cid: normalized.cid,
       firstName: normalized.firstName,
       lastName: normalized.lastName,
-      hospcode: normalized.hospcode,
+      hospcode: office.hospcode,
       updatedBy: auth.userId
     });
 
@@ -227,6 +227,13 @@ export class PersonnelService {
     const uniqueMap = new Map<string, PersonnelUpsertRow>();
     const normalizedErrors = [...rowErrors];
 
+    // แปลงรหัสของทุกแถวในครั้งเดียว ไฟล์เป็นพันแถวก็ยังยิง query เดียว
+    const officeMap = await this.model.resolveOfficeCodes(
+      parsedRows.map((row) => this.resolveHospcodeForRow(auth, row.hospcode))
+        .filter((r) => r.ok)
+        .map((r) => (r as { ok: true; hospcode: string }).hospcode)
+    );
+
     for (const row of parsedRows) {
       const resolvedHospcode = this.resolveHospcodeForRow(auth, row.hospcode);
       if (!resolvedHospcode.ok) {
@@ -234,18 +241,29 @@ export class PersonnelService {
         continue;
       }
 
-      const scopeValidation = this.validateScope(auth, resolvedHospcode.hospcode);
+      const office = officeMap.get(resolvedHospcode.hospcode);
+      if (!office) {
+        normalizedErrors.push({ rowNumber: row.rowNumber, error: 'HOSPCODE_NOT_FOUND' });
+        continue;
+      }
+
+      if (!office.code5) {
+        normalizedErrors.push({ rowNumber: row.rowNumber, error: 'OFFICE_WITHOUT_CODE5' });
+        continue;
+      }
+
+      const scopeValidation = this.validateScope(auth, office.code5);
       if (!scopeValidation.ok) {
         normalizedErrors.push({ rowNumber: row.rowNumber, error: 'SCOPE_FORBIDDEN' });
         continue;
       }
 
-      const key = `${row.cid}|${resolvedHospcode.hospcode}`;
+      const key = `${row.cid}|${office.code5}`;
       uniqueMap.set(key, {
         cid: row.cid,
         firstName: row.firstName,
         lastName: row.lastName,
-        hospcode: resolvedHospcode.hospcode
+        hospcode: office.code5
       });
     }
 
@@ -318,6 +336,39 @@ export class PersonnelService {
     }
 
     return { ok: false, status: StatusCodes.FORBIDDEN, error: 'SCOPE_FORBIDDEN' };
+  }
+
+  /**
+   * แปลงรหัสหน่วยงานเป็น code5 ตามทะเบียนกลาง แล้วตรวจสิทธิ์ด้วยรหัสนั้น
+   *
+   * เดิม normalizeInput ตรวจแค่ว่า hospcode ไม่ว่าง ไม่เทียบกับทะเบียนเลย
+   * ผู้มีขอบเขตทุกหน่วยงานจึงบันทึกรหัสอะไรก็ได้ รวมทั้ง hcode9 และคำที่พิมพ์ผิด
+   * ซึ่งจะกลายเป็นข้อมูลที่ไม่มีโมดูลไหนกรองเจอ และ FK ในฐานนี้ก็ไม่บังคับ (DATA-02)
+   *
+   * ต้องแปลงก่อนตรวจสิทธิ์ เพราะขอบเขตของผู้ใช้เก็บเป็น code5
+   * ถ้าเอา hcode9 ไปเทียบตรง ๆ จะถูกปฏิเสธทั้งที่เป็นหน่วยงานเดียวกัน
+   */
+  private async resolveHospcode(auth: AuthContext, rawHospcode: string) {
+    const resolved = await this.model.resolveOfficeCodes([rawHospcode]);
+    const office = resolved.get(String(rawHospcode ?? '').trim());
+
+    if (!office) {
+      return { ok: false as const, status: StatusCodes.BAD_REQUEST, error: 'HOSPCODE_NOT_FOUND' };
+    }
+
+    if (!office.code5) {
+      return {
+        ok: false as const,
+        status: StatusCodes.BAD_REQUEST,
+        error: 'OFFICE_WITHOUT_CODE5',
+        message: 'หน่วยงานนี้ยังไม่มีรหัส 5 หลัก จึงยังบันทึกข้อมูลบุคลากรไม่ได้'
+      };
+    }
+
+    const scopeValidation = this.validateScope(auth, office.code5);
+    if (!scopeValidation.ok) return scopeValidation as { ok: false; status: number; error: string };
+
+    return { ok: true as const, hospcode: office.code5 };
   }
 
   private resolveHospcodeForRow(auth: AuthContext, rawHospcode?: string):

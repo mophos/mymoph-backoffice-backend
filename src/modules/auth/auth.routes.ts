@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import { mymophDb, systemDb } from '../../db/knex';
+import { asyncHandler } from '../../shared/utils/async-handler';
 import { config } from '../../config/env';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { AuthModel } from './auth.model';
@@ -21,7 +22,7 @@ const secureCookie = {
   path: '/'
 } as const;
 
-router.get('/login-url', async (req, res) => {
+router.get('/login-url', asyncHandler(async (req, res) => {
   const returnTo = typeof req.query.returnTo === 'string' ? req.query.returnTo : '/';
   const { authorizationUrl, encodedContext } = authService.getLoginUrl(returnTo);
 
@@ -31,7 +32,7 @@ router.get('/login-url', async (req, res) => {
   });
 
   res.json({ ok: true, data: { authorizationUrl } });
-});
+}));
 
 router.get('/callback', async (req, res) => {
   const code = typeof req.query.code === 'string' ? req.query.code : '';
@@ -80,12 +81,12 @@ router.get('/callback', async (req, res) => {
   }
 });
 
-router.get('/me', authMiddleware, async (req, res) => {
+router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
   const data = await authService.meFromAuth(req.auth!);
   res.json({ ok: true, data });
-});
+}));
 
-router.post('/refresh', async (req, res) => {
+router.post('/refresh', asyncHandler(async (req, res) => {
   const refreshToken = req.cookies?.[REFRESH_COOKIE] ?? req.body?.refreshToken;
   if (!refreshToken) {
     res.status(StatusCodes.UNAUTHORIZED).json({ ok: false, error: 'MISSING_REFRESH_TOKEN' });
@@ -109,9 +110,9 @@ router.post('/refresh', async (req, res) => {
   });
 
   res.json({ ok: true, data: result.data });
-});
+}));
 
-router.post('/logout', authMiddleware, async (req, res) => {
+router.post('/logout', authMiddleware, asyncHandler(async (req, res) => {
   const refreshToken = req.cookies?.[REFRESH_COOKIE] ?? req.body?.refreshToken;
   await authService.logout(refreshToken);
 
@@ -119,6 +120,6 @@ router.post('/logout', authMiddleware, async (req, res) => {
   res.clearCookie(REFRESH_COOKIE, { ...secureCookie });
 
   res.json({ ok: true });
-});
+}));
 
 export const authRoutes = router;

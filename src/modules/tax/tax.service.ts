@@ -79,13 +79,8 @@ export class TaxService {
     const normalizedYear = this.normalizeYearBe(input.yearBe);
     if (!normalizedYear.ok) return normalizedYear;
 
-    const hospcodeResult = this.resolveHospcodeForCreate(auth, input.hospcode);
+    const hospcodeResult = await this.resolveHospcodeForCreate(auth, input.hospcode);
     if (!hospcodeResult.ok) return hospcodeResult;
-
-    const orgExists = await this.model.organizationExists(hospcodeResult.hospcode);
-    if (!orgExists) {
-      return { ok: false, status: StatusCodes.BAD_REQUEST, error: 'HOSPCODE_NOT_FOUND' };
-    }
 
     const exists = await this.model.findYearByYearHospcode(normalizedYear.yearBe, hospcodeResult.hospcode);
     if (exists && Number(exists.is_active) === 1) {
@@ -409,7 +404,9 @@ export class TaxService {
       yearBe: Number(year.year_be),
       search: query.search,
       pageSize: query.pageSize,
-      offset: query.offset
+      offset: query.offset,
+      scopeType: auth.scopeType,
+      hospcodes: auth.hospcodes
     });
 
     return {
@@ -811,24 +808,51 @@ export class TaxService {
     } as const;
   }
 
-  private resolveHospcodeForCreate(auth: AuthContext, rawHospcode?: string) {
-    const hospcode = String(rawHospcode ?? '').trim();
+  /**
+   * หารหัสหน่วยงานที่จะใช้สร้างปีภาษี แล้วตรวจสิทธิ์ด้วยรหัส 5 หลักเสมอ
+   *
+   * ต้องแปลงก่อนตรวจสิทธิ์ เพราะขอบเขตของผู้ใช้เก็บเป็น code5
+   * ถ้าเอา hcode9 ที่ส่งมาไปเทียบตรง ๆ จะถูกปฏิเสธทั้งที่เป็นหน่วยงานเดียวกัน
+   *
+   * และต้องคืนค่าที่ normalize แล้วให้ผู้เรียกเสมอ เพราะรหัสนี้ถูกเอาไปใช้
+   * ทั้งเป็นค่าในฐานและ **ชื่อโฟลเดอร์ที่เก็บไฟล์** (ดู buildRelativePath)
+   * ถ้าปล่อยค่าดิบผ่านไป ที่เก็บไฟล์จะมีโฟลเดอร์ปนสองรูปแบบ
+   */
+  private async resolveHospcodeForCreate(auth: AuthContext, rawHospcode?: string) {
+    const raw = String(rawHospcode ?? '').trim();
 
-    if (hospcode) {
-      const scopeValidation = this.validateScope(auth, hospcode);
-      if (!scopeValidation.ok) return scopeValidation;
-      return { ok: true, hospcode } as const;
+    if (!raw) {
+      if (auth.scopeType === 'LIST' && auth.hospcodes.length === 1) {
+        return { ok: true, hospcode: auth.hospcodes[0] } as const;
+      }
+
+      return {
+        ok: false,
+        status: StatusCodes.BAD_REQUEST,
+        error: 'HOSPCODE_REQUIRED'
+      } as const;
     }
 
-    if (auth.scopeType === 'LIST' && auth.hospcodes.length === 1) {
-      return { ok: true, hospcode: auth.hospcodes[0] } as const;
+    const office = await this.model.resolveOfficeCode(raw);
+    if (!office) {
+      return { ok: false, status: StatusCodes.BAD_REQUEST, error: 'HOSPCODE_NOT_FOUND' } as const;
     }
 
-    return {
-      ok: false,
-      status: StatusCodes.BAD_REQUEST,
-      error: 'HOSPCODE_REQUIRED'
-    } as const;
+    // ไม่มี code5 = อ้างอิงได้ด้วย hcode9 อย่างเดียว ซึ่งยังใช้เป็นขอบเขตผู้ใช้
+    // และชื่อโฟลเดอร์ไม่ได้ จึงยังสร้างปีภาษีให้ไม่ได้
+    if (!office.code5) {
+      return {
+        ok: false,
+        status: StatusCodes.BAD_REQUEST,
+        error: 'OFFICE_WITHOUT_CODE5',
+        message: 'หน่วยงานนี้ยังไม่มีรหัส 5 หลัก จึงยังสร้างปีภาษีไม่ได้'
+      } as const;
+    }
+
+    const scopeValidation = this.validateScope(auth, office.code5);
+    if (!scopeValidation.ok) return scopeValidation;
+
+    return { ok: true, hospcode: office.code5 } as const;
   }
 
   private normalizeYearBe(rawYear: number) {

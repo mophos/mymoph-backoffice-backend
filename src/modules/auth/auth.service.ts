@@ -145,8 +145,8 @@ export class AuthService {
           permissions: authContext.permissions,
           scopeType: authContext.scopeType,
           hospcodes: authContext.hospcodes,
-          allowedModules: this.menuService.getAllowedModules(authContext.permissions),
-          menus: this.menuService.getMenusByPermissions(authContext.permissions)
+          allowedModules: this.menuService.getAllowedModules(authContext.permissions, authContext.roles),
+          menus: this.menuService.getMenusByPermissions(authContext.permissions, authContext.roles)
         }
       }
     };
@@ -162,8 +162,8 @@ export class AuthService {
         permissions: auth.permissions,
         scopeType: auth.scopeType,
         hospcodes: auth.hospcodes,
-        allowedModules: this.menuService.getAllowedModules(auth.permissions),
-        menus: this.menuService.getMenusByPermissions(auth.permissions)
+        allowedModules: this.menuService.getAllowedModules(auth.permissions, auth.roles),
+        menus: this.menuService.getMenusByPermissions(auth.permissions, auth.roles)
       }
     };
   }

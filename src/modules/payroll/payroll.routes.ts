@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { systemDb } from '../../db/knex';
 import { authMiddleware } from '../../middleware/auth.middleware';
+import { asyncHandler } from '../../shared/utils/async-handler';
 import { auditMiddleware } from '../../middleware/audit.middleware';
 import { requirePermission } from '../../middleware/permission.middleware';
 import { requireAssignedScopeMiddleware } from '../../middleware/scope-required.middleware';
@@ -16,10 +17,10 @@ router.get(
   requirePermission('payroll.read'),
   requireAssignedScopeMiddleware,
   auditMiddleware('payroll', 'read_summary'),
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const rows = await payrollService.list(req.auth!, req.auth!.hospcodes);
     res.json({ ok: true, data: rows });
-  }
+  })
 );
 
 router.get(
@@ -28,9 +29,9 @@ router.get(
   requirePermission('payroll.export'),
   requireAssignedScopeMiddleware,
   auditMiddleware('payroll', 'export'),
-  async (_req, res) => {
+  asyncHandler(async (_req, res) => {
     res.json({ ok: true, data: { message: 'Payroll export placeholder (phase 2)' } });
-  }
+  })
 );
 
 export const payrollRoutes = router;

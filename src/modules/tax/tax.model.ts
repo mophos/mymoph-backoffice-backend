@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 const TAX_YEARS_TABLE = 'tax_years';
 const TAX_DOCUMENTS_TABLE = 'tax_documents';
 const TAX_DOCUMENT_DELETE_LOGS_TABLE = 'tax_document_delete_logs';
-const ORGANIZATIONS_TABLE = 'organizations';
+import { HCODE_TABLE } from '../../shared/services/hcode-bridge.service';
 
 export interface TaxYearRow {
   id: number;
@@ -50,6 +50,9 @@ interface ListYearlyPeopleOverviewInput {
   search?: string;
   pageSize: number;
   offset: number;
+  /** ALL เห็นทุกหน่วยงาน LIST เห็นเฉพาะที่ตัวเองดูแล */
+  scopeType: 'ALL' | 'LIST';
+  hospcodes: string[];
 }
 
 export interface CreateTaxYearInput {
@@ -106,13 +109,38 @@ export interface InsertTaxDocumentDeleteLogRow {
 export class TaxModel {
   constructor(private readonly db: Knex) {}
 
-  async organizationExists(hospcode: string) {
-    const row = await this.db(ORGANIZATIONS_TABLE)
-      .where({ hospcode })
-      .andWhere('is_active', 1)
+  /**
+   * ตรวจว่ารหัสหน่วยงานมีอยู่จริงในทะเบียนกลาง hcode_health_office
+   *
+   * ย้ายมาจากตาราง organizations ที่เคยกรอกมือ 104 แถว
+   * รับได้ทั้ง code5 และ hcode9 ตามหลักใน 11-HCODE-MIGRATION.md
+   * และรับเฉพาะหน่วยงานที่ยังเปิดทำการ
+   */
+  /**
+   * แปลงรหัสที่รับเข้ามา (code5 หรือ hcode9) ให้เป็นคู่รหัสตามทะเบียนกลาง
+   *
+   * เดิมชื่อ organizationExists และคืนแค่ true/false ผู้เรียกจึงเอาค่าที่รับมา
+   * ไปเก็บลงฐานดิบ ๆ ทั้งที่อาจเป็น hcode9 ซึ่งกลายเป็นชื่อโฟลเดอร์บนดิสก์ด้วย
+   *
+   * เรียงแบบเดียวกับ HcodeBridgeService เพราะ code5 บางตัวชี้ไปหลาย hcode9
+   */
+  async resolveOfficeCode(hospcode: string): Promise<{ code5: string | null; hcode9: string } | null> {
+    const code = String(hospcode ?? '').trim();
+    if (!code) return null;
+
+    const row = await this.db(HCODE_TABLE)
+      .where((builder) => {
+        builder.where('code5', code).orWhere('hcode9', code);
+      })
+      .andWhere('active', 1)
+      .orderBy([{ column: 'modified_date', order: 'desc' }])
+      .select('code5', 'hcode9')
       .first();
 
-    return Boolean(row);
+    if (!row) return null;
+
+    const code5 = row.code5 ? String(row.code5).trim() : '';
+    return { code5: code5 || null, hcode9: String(row.hcode9).trim() };
   }
 
   async listYears(input: ListYearsInput) {
@@ -310,6 +338,12 @@ export class TaxModel {
     const base = this.db(`${TAX_DOCUMENTS_TABLE} as d`)
       .where('d.is_active', 1)
       .andWhere('d.year_be', input.yearBe);
+
+    // TAX-03: เดิมกรองด้วยปีอย่างเดียว ผู้ที่มีบทบาท super_admin_affairs
+    // ซึ่งมีขอบเขตหน่วยงานเดียว จึงเห็นข้อมูลของทุกหน่วยงานในปีนั้น
+    if (input.scopeType === 'LIST') {
+      base.whereIn('d.hospcode', input.hospcodes.length ? input.hospcodes : ['']);
+    }
 
     if (input.search) {
       base.andWhere((qb) => {

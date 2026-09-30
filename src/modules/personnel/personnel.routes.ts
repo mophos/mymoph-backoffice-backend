@@ -3,10 +3,12 @@ import multer from 'multer';
 import { z } from 'zod';
 import { systemDb } from '../../db/knex';
 import { authMiddleware } from '../../middleware/auth.middleware';
+import { asyncHandler } from '../../shared/utils/async-handler';
 import { auditMiddleware } from '../../middleware/audit.middleware';
 import { requirePermission } from '../../middleware/permission.middleware';
 import { requireAssignedScopeMiddleware } from '../../middleware/scope-required.middleware';
 import { parsePagination } from '../../shared/utils/pagination';
+import { parseBody } from '../../shared/utils/parse-body';
 import { PersonnelModel } from './personnel.model';
 import { PersonnelService } from './personnel.service';
 
@@ -43,7 +45,7 @@ router.get(
   requirePermission('personnel.read'),
   requireAssignedScopeMiddleware,
   auditMiddleware('personnel', 'read'),
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const pagination = parsePagination(req.query as Record<string, unknown>);
 
     const data = await service.list(req.auth!, {
@@ -52,7 +54,7 @@ router.get(
     });
 
     res.json({ ok: true, data });
-  }
+  })
 );
 
 router.post(
@@ -61,8 +63,9 @@ router.post(
   requirePermission('personnel.manage'),
   requireAssignedScopeMiddleware,
   auditMiddleware('personnel', 'create'),
-  async (req, res) => {
-    const payload = createSchema.parse(req.body);
+  asyncHandler(async (req, res) => {
+    const payload = parseBody(createSchema, req.body, res, 'INVALID_PERSONNEL_PAYLOAD');
+    if (!payload) return;
     req.effectiveHospcodes = [payload.hospcode];
 
     const result = await service.create(req.auth!, payload);
@@ -72,7 +75,7 @@ router.post(
     }
 
     res.status(Number(result.status ?? 201)).json(result);
-  }
+  })
 );
 
 router.put(
@@ -81,8 +84,9 @@ router.put(
   requirePermission('personnel.manage'),
   requireAssignedScopeMiddleware,
   auditMiddleware('personnel', 'update'),
-  async (req, res) => {
-    const payload = updateSchema.parse(req.body);
+  asyncHandler(async (req, res) => {
+    const payload = parseBody(updateSchema, req.body, res, 'INVALID_PERSONNEL_PAYLOAD');
+    if (!payload) return;
     if (payload.hospcode) {
       req.effectiveHospcodes = [payload.hospcode];
     }
@@ -94,7 +98,7 @@ router.put(
     }
 
     res.status(Number(result.status ?? 200)).json(result);
-  }
+  })
 );
 
 router.delete(
@@ -103,7 +107,7 @@ router.delete(
   requirePermission('personnel.manage'),
   requireAssignedScopeMiddleware,
   auditMiddleware('personnel', 'delete'),
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const result = await service.remove(req.auth!, req.params.id);
     if (!result.ok) {
       res.status(Number(result.status ?? 400)).json(result);
@@ -111,7 +115,7 @@ router.delete(
     }
 
     res.status(Number(result.status ?? 200)).json(result);
-  }
+  })
 );
 
 router.get(
@@ -119,13 +123,13 @@ router.get(
   authMiddleware,
   requirePermission('personnel.read'),
   auditMiddleware('personnel', 'download_template'),
-  async (_req, res) => {
+  asyncHandler(async (_req, res) => {
     const file = await service.exportTemplate();
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
     res.setHeader('Cache-Control', 'no-store');
     res.send(file.fileBuffer);
-  }
+  })
 );
 
 router.post(
@@ -135,7 +139,7 @@ router.post(
   requireAssignedScopeMiddleware,
   upload.single('file'),
   auditMiddleware('personnel', 'upload_excel'),
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     if (!req.file?.buffer) {
       res.status(400).json({ ok: false, error: 'FILE_REQUIRED' });
       return;
@@ -148,7 +152,7 @@ router.post(
     }
 
     res.status(Number(result.status ?? 200)).json(result);
-  }
+  })
 );
 
 export const personnelRoutes = router;

@@ -34,12 +34,22 @@ export interface OAuthUserInfo {
   [key: string]: unknown;
 }
 
+/** กลุ่มของเมนูใน sidebar เรียงตามลำดับที่ประกาศไว้ */
+export type MenuGroup = 'operations' | 'finance' | 'administration';
+
 export interface MenuItem {
   id: string;
   label: string;
+  group: MenuGroup;
   icon: string;
   path: string;
   module: string;
   requiredPermissions: PermissionCode[];
+  /**
+   * บทบาทที่บังคับเพิ่มจาก permission (ADMIN-06)
+   * มีไว้สำหรับเมนูที่ service ตรวจบทบาทเพิ่มอีกชั้น เช่น Finance Office Admin
+   * ที่ต้องมี super_admin_affairs มิฉะนั้นเข้าหน้าได้แต่ทุก API ตอบ FORBIDDEN
+   */
+  requiredRoles?: string[];
   children?: MenuItem[];
 }
