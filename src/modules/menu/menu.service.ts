@@ -20,7 +20,15 @@ export class MenuService {
     });
   }
 
+  /**
+   * โมดูลที่บัญชีนี้เข้าถึงได้ ไม่ซ้ำกัน
+   *
+   * เมนูมากกว่าหนึ่งเมนูใช้ module เดียวกันได้ เช่น "ผู้ใช้และสิทธิ์" กับ
+   * "ผู้ใช้และสิทธิ์: การเงิน" ที่เป็น user-role-management ทั้งคู่
+   * จึงต้องตัดค่าซ้ำก่อนส่งออก
+   */
   getAllowedModules(permissions: PermissionCode[], roles: string[] = []): string[] {
-    return this.getMenusByPermissions(permissions, roles).map((item) => item.module);
+    const modules = this.getMenusByPermissions(permissions, roles).map((item) => item.module);
+    return [...new Set(modules)];
   }
 }
