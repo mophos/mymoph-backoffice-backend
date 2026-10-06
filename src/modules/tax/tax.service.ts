@@ -16,6 +16,13 @@ interface ListYearsQuery {
   hospcodeSearch?: string;
 }
 
+interface SearchDocumentsQuery extends PaginationQuery {
+  /** ปี พ.ศ. ที่กรอง ไม่ระบุ = ทุกปี */
+  yearBe?: number;
+  /** หน่วยงานที่กรอง ต้องอยู่ในขอบเขตของบัญชี */
+  hospcode?: string;
+}
+
 interface YearInput {
   yearBe: number;
   hospcode?: string;
@@ -59,7 +66,7 @@ export class TaxService {
     const hospcodeSearch = String(query?.hospcodeSearch ?? '').trim();
 
     const rows = await this.model.listYears({
-      scopeType: auth.scopeType,
+      scopeType: this.readScopeType(auth),
       hospcodes: auth.hospcodes,
       hospcodeSearch: hospcodeSearch || undefined
     });
@@ -174,12 +181,12 @@ export class TaxService {
       return { ok: false, status: StatusCodes.NOT_FOUND, error: 'TAX_YEAR_NOT_FOUND' };
     }
 
-    const scopeValidation = this.validateScope(auth, String(year.hospcode));
+    const scopeValidation = this.validateReadScope(auth, String(year.hospcode));
     if (!scopeValidation.ok) return scopeValidation;
 
     const data = await this.model.listDocuments({
       yearId,
-      scopeType: auth.scopeType,
+      scopeType: this.readScopeType(auth),
       hospcodes: auth.hospcodes,
       search: query.search,
       pageSize: query.pageSize,
@@ -405,7 +412,7 @@ export class TaxService {
       search: query.search,
       pageSize: query.pageSize,
       offset: query.offset,
-      scopeType: auth.scopeType,
+      scopeType: this.readScopeType(auth),
       hospcodes: auth.hospcodes
     });
 
@@ -426,6 +433,64 @@ export class TaxService {
           totalFiles: Number(row.total_files ?? 0),
           hospcodeCount: Number(row.hospcode_count ?? 0),
           hospcodes: String(row.hospcodes ?? ''),
+          updatedAt: row.updated_at
+        }))
+      }
+    };
+  }
+
+  /**
+   * ค้นไฟล์ข้ามปีและข้ามหน่วยงาน
+   *
+   * ใช้ตอนรู้เลขบัตรแต่ไม่รู้ว่าไฟล์อยู่ปีไหนหน่วยงานไหน ซึ่งเดิมต้องเปิดปี
+   * ทีละปีแล้วค้นซ้ำ ๆ
+   *
+   * ไม่เปิดสิทธิ์ใหม่: บัญชีที่ scopeType เป็น LIST ยังเห็นเฉพาะหน่วยงานของตัวเอง
+   * เพราะ model กรองด้วย auth.hospcodes เสมอ และถ้าส่ง hospcode ที่อยู่นอกขอบเขต
+   * มาเป็นตัวกรอง จะถูกปฏิเสธที่นี่ก่อนถึง query
+   */
+  async searchDocuments(auth: AuthContext, query: SearchDocumentsQuery) {
+    if (query.hospcode) {
+      const scopeValidation = this.validateReadScope(auth, query.hospcode);
+      if (!scopeValidation.ok) return scopeValidation;
+    }
+
+    const data = await this.model.searchDocuments({
+      search: query.search,
+      yearBe: query.yearBe,
+      hospcode: query.hospcode,
+      scopeType: this.readScopeType(auth),
+      hospcodes: auth.hospcodes,
+      pageSize: query.pageSize,
+      offset: query.offset
+    });
+
+    // ok เป็น literal เพื่อให้ผู้เรียกแยกแขนงสำเร็จ/ล้มเหลวได้จาก type
+    return {
+      ok: true as const,
+      status: StatusCodes.OK,
+      data: {
+        total: data.total,
+        page: query.page,
+        pageSize: query.pageSize,
+        rows: data.rows.map((row: any) => ({
+          id: String(row.id),
+          taxYearId: Number(row.tax_year_id),
+          yearBe: Number(row.year_be),
+          yearShort: this.toYearShort(Number(row.year_be)),
+          /**
+           * ปีที่เอกสารบันทึกไว้เอง ต่างจาก yearBe ได้
+           *
+           * มีข้อมูลจริง 1,228 แถวที่ไม่ตรง เป็นร่องรอยของการแก้ปีภาษีย้อนหลัง
+           * สมัยที่ยังทำได้ หน้าเว็บใช้ค่านี้เตือนว่าแถวนั้นข้อมูลไม่สอดคล้อง
+           */
+          documentYearBe: Number(row.document_year_be),
+          hospcode: String(row.hospcode),
+          cid: String(row.cid),
+          fileNo: Number(row.file_no),
+          fileName: String(row.file_name ?? ''),
+          originalFileName: row.original_file_name ? String(row.original_file_name) : null,
+          sourceType: String(row.source_type ?? ''),
           updatedAt: row.updated_at
         }))
       }
@@ -530,7 +595,7 @@ export class TaxService {
       return { ok: false, status: StatusCodes.NOT_FOUND, error: 'TAX_DOCUMENT_NOT_FOUND' };
     }
 
-    const scopeValidation = this.validateScope(auth, String(doc.hospcode));
+    const scopeValidation = this.validateReadScope(auth, String(doc.hospcode));
     if (!scopeValidation.ok) return scopeValidation;
 
     const absolutePath = this.resolveStoragePath(String(doc.relative_path));
@@ -884,7 +949,49 @@ export class TaxService {
     return String(yearBe % 100).padStart(2, '0');
   }
 
+  /** เปิดมุมมองนี้ได้ไหม — คงเงื่อนไขเดิม */
   private canViewYearlyPeopleOverview(auth: AuthContext) {
     return auth.roles.includes('super_admin') || auth.roles.includes('super_admin_affairs');
+  }
+
+  /**
+   * เห็นข้ามหน่วยงานได้ไหม — แยกจากการเปิดมุมมอง
+   *
+   * ฟีเจอร์นี้ตั้งใจให้หาคนที่มีเอกสารอยู่หลายหน่วยงาน (ปี 2568 มี 417 คน)
+   * ฟิลด์ hospcodeCount กับ hospcodes จึงมีความหมายเฉพาะเมื่อมองข้ามได้
+   *
+   * ผู้ที่มีสิทธิ์แค่หน้าใบรับรองภาษี (payroll.read) ต้องเห็นเฉพาะหน่วยงานตัวเอง
+   * จะเห็นข้ามได้ต้องเข้าถึงหน้า "ผู้ใช้และสิทธิ์: การเงิน" ได้ด้วย
+   * ซึ่งใช้เงื่อนไขเดียวกับเมนูนั้นคือ finance_admin.manage + super_admin_affairs
+   */
+  private canViewAllOffices(auth: AuthContext) {
+    if (auth.scopeType === 'ALL') return true;
+    return (
+      auth.permissions.includes('finance_admin.manage') &&
+      auth.roles.includes('super_admin_affairs')
+    );
+  }
+
+  /**
+   * ขอบเขตสำหรับ "การอ่าน" ในโมดูลนี้
+   *
+   * ฝ่ายการเงินส่วนกลางอ่านได้ทุกหน่วยงาน ส่วนคนที่มีสิทธิ์แค่หน้าใบรับรองภาษี
+   * อ่านได้แค่หน่วยงานตัวเอง ใช้คู่กับ validateReadScope ให้ครบทั้งสองด้าน
+   * คือการกรองรายการ และการเข้าถึงรายการเดี่ยว
+   */
+  private readScopeType(auth: AuthContext): 'ALL' | 'LIST' {
+    return this.canViewAllOffices(auth) ? 'ALL' : 'LIST';
+  }
+
+  /**
+   * ตรวจขอบเขตสำหรับการอ่าน
+   *
+   * **ต่างจาก validateScope ที่ใช้กับการเขียน** การอ่านผ่อนให้ฝ่ายการเงินส่วนกลาง
+   * แต่การสร้าง ลบ และอัปโหลด ยังจำกัดที่หน่วยงานของตัวเองเสมอ
+   * เพราะ "เห็นได้" กับ "แก้ได้" เป็นสิทธิ์คนละระดับ
+   */
+  private validateReadScope(auth: AuthContext, hospcode: string) {
+    if (this.canViewAllOffices(auth)) return { ok: true } as const;
+    return this.validateScope(auth, hospcode);
   }
 }

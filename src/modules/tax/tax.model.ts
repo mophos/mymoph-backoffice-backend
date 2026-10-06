@@ -45,6 +45,19 @@ interface ListDocumentsInput {
   offset: number;
 }
 
+interface SearchDocumentsInput {
+  /** คำค้นเทียบกับเลขบัตรและชื่อไฟล์ ว่างได้ถ้ากรองด้วยปีหรือหน่วยงานอย่างเดียว */
+  search?: string;
+  /** กรองปี พ.ศ. ไม่ระบุ = ทุกปี */
+  yearBe?: number;
+  /** กรองหน่วยงาน ต้องอยู่ในขอบเขตของบัญชีด้วย service ตรวจให้แล้ว */
+  hospcode?: string;
+  scopeType: 'ALL' | 'LIST';
+  hospcodes: string[];
+  pageSize: number;
+  offset: number;
+}
+
 interface ListYearlyPeopleOverviewInput {
   yearBe: number;
   search?: string;
@@ -323,6 +336,87 @@ export class TaxModel {
         'd.created_at',
         'd.updated_at'
       )
+      .orderBy('d.cid', 'asc')
+      .orderBy('d.file_no', 'asc')
+      .limit(input.pageSize)
+      .offset(input.offset);
+
+    return {
+      total: Number(total ?? 0),
+      rows
+    };
+  }
+
+  /**
+   * ค้นไฟล์ข้ามปีและข้ามหน่วยงาน ภายใต้ขอบเขตของบัญชี
+   *
+   * ต่างจาก listDocuments ที่ล็อกอยู่ปีเดียว เส้นนี้ใช้ตอนรู้เลขบัตรแต่ไม่รู้ว่า
+   * อยู่ปีไหนหน่วยงานไหน จึงต้องคืนปีกับหน่วยงานมาในแถวด้วย
+   *
+   * เลขบัตรครบ 13 หลักใช้ `=` เพื่อให้ไปทาง idx_tax_doc_cid
+   * ส่วนคำค้นบางส่วนต้องใช้ LIKE ที่มี % นำหน้า ซึ่งใช้ index ไม่ได้
+   * ตอนนี้ตารางมี 135k แถวและวัดได้ 13-26 ms จึงยังรับได้
+   * ถ้าข้อมูลโตเป็นหลายปีควรทบทวนจุดนี้
+   */
+  async searchDocuments(input: SearchDocumentsInput) {
+    const base = this.db(`${TAX_DOCUMENTS_TABLE} as d`)
+      .innerJoin(`${TAX_YEARS_TABLE} as y`, 'y.id', 'd.tax_year_id')
+      .where('d.is_active', 1)
+      .andWhere('y.is_active', 1);
+
+    if (input.scopeType === 'LIST') {
+      base.whereIn('d.hospcode', input.hospcodes.length ? input.hospcodes : ['']);
+    }
+
+    if (input.hospcode) {
+      base.andWhere('d.hospcode', input.hospcode);
+    }
+
+    /*
+     * กรองด้วยปีของ "แถวปีภาษี" ไม่ใช่ปีที่ denormalize ไว้ในเอกสาร
+     *
+     * ตัวเลือกปีในหน้าเว็บมาจาก tax_years ถ้ากรองด้วย d.year_be ผลจะขัดกับ
+     * ตารางปีที่อยู่หน้าเดียวกัน เพราะมีข้อมูลที่สองค่านี้ไม่ตรงกันอยู่จริง
+     * (ปี id=14 เป็น 2568 แต่เอกสาร 1,228 แถวของมันบันทึก 2500 ไว้
+     *  ร่องรอยของการแก้ปีภาษีย้อนหลังสมัยที่ยังทำได้)
+     */
+    if (input.yearBe !== undefined) {
+      base.andWhere('y.year_be', input.yearBe);
+    }
+
+    if (input.search) {
+      const term = input.search;
+      if (/^\d{13}$/.test(term)) {
+        base.andWhere('d.cid', term);
+      } else {
+        base.andWhere((qb) => {
+          qb.where('d.cid', 'like', `%${term}%`).orWhere('d.file_name', 'like', `%${term}%`);
+        });
+      }
+    }
+
+    const [{ total }] = await base.clone().count<{ total: number }[]>({ total: '*' });
+
+    const rows = await base
+      .clone()
+      .select(
+        'd.id',
+        'd.tax_year_id',
+        // ปีที่เชื่อถือได้คือของแถวปีภาษี ซึ่งเป็นตัวที่หน้าเว็บใช้นำทางและนับจำนวนไฟล์
+        { year_be: 'y.year_be' },
+        // ปีที่เอกสารบันทึกไว้เอง เก็บมาด้วยเพื่อให้เห็นได้เมื่อสองค่าไม่ตรงกัน
+        { document_year_be: 'd.year_be' },
+        'd.hospcode',
+        'd.cid',
+        'd.file_no',
+        'd.file_name',
+        'd.original_file_name',
+        'd.source_type',
+        'd.created_at',
+        'd.updated_at'
+      )
+      .orderBy('y.year_be', 'desc')
+      .orderBy('d.hospcode', 'asc')
       .orderBy('d.cid', 'asc')
       .orderBy('d.file_no', 'asc')
       .limit(input.pageSize)

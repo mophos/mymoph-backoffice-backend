@@ -1,4 +1,4 @@
-import { NextFunction, Request, Response, Router } from 'express';
+import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
 import { systemDb } from '../../db/knex';
@@ -7,6 +7,7 @@ import { auditMiddleware } from '../../middleware/audit.middleware';
 import { internalServiceMiddleware } from '../../middleware/internal-service.middleware';
 import { requirePermission } from '../../middleware/permission.middleware';
 import { requireAssignedScopeMiddleware } from '../../middleware/scope-required.middleware';
+import { asyncHandler } from '../../shared/utils/async-handler';
 import { parsePagination } from '../../shared/utils/pagination';
 import { TaxModel } from './tax.model';
 import { TaxService } from './tax.service';
@@ -14,12 +15,6 @@ import { TaxService } from './tax.service';
 const router = Router();
 const service = new TaxService(new TaxModel(systemDb));
 const TAX_UPLOAD_MAX_FILE_SIZE = 300 * 1024 * 1024; // 300MB
-const asyncHandler = (handler: (req: Request, res: Response, next: NextFunction) => Promise<void>) => {
-  return (req: Request, res: Response, next: NextFunction) => {
-    Promise.resolve(handler(req, res, next)).catch(next);
-  };
-};
-
 const uploadIndividual = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -39,6 +34,18 @@ const yearSchema = z.object({
   hospcode: z.string().trim().min(1).max(10).optional()
 });
 const documentIdSchema = z.string().uuid();
+
+/**
+ * ตัวกรองของการค้นไฟล์ข้ามปี ทุกช่องเว้นได้
+ *
+ * yearBe รับช่วงเดียวกับการสร้างปี ส่วน hospcode ปล่อยให้ service ตรวจขอบเขต
+ * เพราะต้องเทียบกับ auth ไม่ใช่เรื่องของรูปแบบ
+ */
+const searchDocumentsSchema = z.object({
+  search: z.string().trim().min(1).max(100).optional(),
+  yearBe: z.coerce.number().int().min(2500).max(3000).optional(),
+  hospcode: z.string().trim().min(1).max(10).optional()
+});
 const internalCidSchema = z.string().regex(/^\d{13}$/);
 
 const isPdfFile = (file?: Express.Multer.File) => {
@@ -403,6 +410,53 @@ router.get(
     }
 
     res.download(result.data.absolutePath, result.data.fileName);
+  })
+);
+
+/*
+ * ค้นไฟล์ข้ามปีและข้ามหน่วยงาน
+ *
+ * ต้องประกาศก่อน '/documents/:id/...' เพราะถ้าอยู่หลัง Express จะเอา
+ * path ว่างไปจับกับ :id ไม่ได้ก็จริง แต่การเรียงแบบนี้อ่านง่ายและกันพลาดไว้ก่อน
+ */
+router.get(
+  '/documents',
+  authMiddleware,
+  requirePermission('payroll.read'),
+  requireAssignedScopeMiddleware,
+  auditMiddleware('tax', 'search_documents'),
+  asyncHandler(async (req, res) => {
+    const parsed = searchDocumentsSchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: 'INVALID_SEARCH_QUERY',
+        details: parsed.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          rule: issue.message
+        }))
+      });
+      return;
+    }
+
+    // ต้องมีเงื่อนไขอย่างน้อยหนึ่งอย่าง ไม่งั้นเท่ากับดึงทั้งตาราง
+    if (!parsed.data.search && parsed.data.yearBe === undefined && !parsed.data.hospcode) {
+      res.status(400).json({ ok: false, error: 'SEARCH_CRITERIA_REQUIRED' });
+      return;
+    }
+
+    const pagination = parsePagination(req.query as Record<string, unknown>);
+    const result = await service.searchDocuments(req.auth!, {
+      ...parsed.data,
+      ...pagination
+    });
+
+    if (!result.ok) {
+      res.status(Number(result.status ?? 400)).json(result);
+      return;
+    }
+
+    res.json(result);
   })
 );
 
