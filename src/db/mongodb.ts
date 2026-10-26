@@ -24,10 +24,30 @@ const getClient = async (): Promise<MongoClient> => {
       minPoolSize: 0
     });
 
-    clientPromise = client.connect().catch((error) => {
+    /**
+     * MONGO-02 ถ้า topology ตายหลังเชื่อมสำเร็จแล้ว ต้องทิ้ง client ตัวนั้น
+     *
+     * เดิมรีเซ็ต clientPromise เฉพาะตอน connect() ล้มเหลวครั้งแรกเท่านั้น
+     * ถ้าตายทีหลัง ทุกคำขอจะได้ client เดิมที่ใช้ไม่ได้กลับไปตลอดอายุ process
+     * โดยไม่มีเส้นทางสร้างใหม่ ต้อง restart ถึงจะกลับมาใช้ได้
+     *
+     * ทิ้งเฉพาะเมื่อยังชี้มาที่ client ตัวนี้ กัน race ตอนมีคนสร้างตัวใหม่ไปแล้ว
+     */
+    const discardIfCurrent = (reason: string) => {
+      if (clientPromise !== pending) return;
       clientPromise = null;
+      console.error('[dependency] MyMOPH MongoDB client ถูกทิ้ง จะเชื่อมใหม่ครั้งถัดไป', reason);
+    };
+
+    client.on('close', () => discardIfCurrent('close'));
+    client.on('topologyClosed', () => discardIfCurrent('topologyClosed'));
+
+    const pending: Promise<MongoClient> = client.connect().catch((error) => {
+      discardIfCurrent('connect failed');
       throw error;
     });
+
+    clientPromise = pending;
   }
 
   return clientPromise;

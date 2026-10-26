@@ -174,13 +174,21 @@ export class AuthModel {
     }
   }
 
+  /**
+   * AUTH-02 ต้อง join `roles` และเช็ก `r.is_active` แบบเดียวกับ getRoleCodes
+   *
+   * เดิมไม่ได้ join `roles` เลย ปิด role แล้วผู้ใช้จะเสียแค่ชื่อ role
+   * แต่สิทธิ์ทั้งหมดของ role นั้นยังติดตัวอยู่ ซึ่งตรงข้ามกับที่ผู้ดูแลคาดหวัง
+   */
   async getPermissionCodes(userId: string): Promise<string[]> {
     try {
       const rows = await this.db('user_roles as ur')
+        .innerJoin('roles as r', 'r.id', 'ur.role_id')
         .innerJoin('role_permissions as rp', 'rp.role_id', 'ur.role_id')
         .innerJoin('permissions as p', 'p.id', 'rp.permission_id')
         .where('ur.user_id', userId)
         .where('ur.is_active', 1)
+        .where('r.is_active', 1)
         .where('rp.is_active', 1)
         .where('p.is_active', 1)
         .distinct('p.code');

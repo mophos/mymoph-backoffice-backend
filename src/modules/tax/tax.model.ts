@@ -519,6 +519,26 @@ export class TaxModel {
     return map;
   }
 
+  /**
+   * หา relative_path ที่ยังมีแถวใช้งานอยู่อ้างถึง — TAX-01
+   *
+   * ใช้ตอนเก็บกวาดไฟล์หลังอัปโหลดล้มเหลว เพื่อไม่ให้ลบไฟล์ที่คำขออื่นจองไปแล้ว
+   */
+  async findReferencedPaths(relativePaths: string[]): Promise<Set<string>> {
+    const found = new Set<string>();
+    const unique = [...new Set(relativePaths.filter((item) => Boolean(item)))];
+
+    for (let index = 0; index < unique.length; index += 500) {
+      const rows = await this.db(TAX_DOCUMENTS_TABLE)
+        .where('is_active', 1)
+        .whereIn('relative_path', unique.slice(index, index + 500))
+        .distinct('relative_path');
+      for (const row of rows as any[]) found.add(String(row.relative_path));
+    }
+
+    return found;
+  }
+
   async insertDocuments(rows: InsertTaxDocumentRow[]) {
     if (!rows.length) return [] as string[];
 

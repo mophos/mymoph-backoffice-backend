@@ -26,7 +26,9 @@ export const auditMiddleware = (module: string, action: string) => {
           details: {
             method: req.method,
             path: req.originalUrl,
-            durationMs: Date.now() - start
+            durationMs: Date.now() - start,
+            // OBS-01 มีค่าเฉพาะคำขอที่ตกไปถึง errorMiddleware
+            ...(req.errorName ? { errorName: req.errorName } : {})
           }
         });
       } catch (error) {

@@ -274,9 +274,20 @@ export class TaxService {
         }
       };
     } catch (error) {
-      // เก็บกวาดแบบไม่โยนทับ error ตัวจริง ไม่งั้นสาเหตุเดิมจะหายไป
-      // และไฟล์ที่เหลือในคิวจะไม่ถูกลบต่อ
-      await this.removeFilesQuietly(writtenPaths);
+      // เก็บกวาดแบบไม่โยนทับ error ตัวจริง และไม่ลบไฟล์ที่คำขออื่นจองไปแล้ว (TAX-01)
+      await this.cleanupWrittenFiles(
+        writtenPaths,
+        documentRows.map((row) => row.relativePath)
+      );
+
+      if (this.isDuplicateKeyError(error)) {
+        return {
+          ok: false,
+          status: StatusCodes.CONFLICT,
+          error: 'TAX_DOCUMENT_ALREADY_EXISTS'
+        } as const;
+      }
+
       throw error;
     }
   }
@@ -372,9 +383,20 @@ export class TaxService {
         }
       };
     } catch (error) {
-      // เก็บกวาดแบบไม่โยนทับ error ตัวจริง ไม่งั้นสาเหตุเดิมจะหายไป
-      // และไฟล์ที่เหลือในคิวจะไม่ถูกลบต่อ
-      await this.removeFilesQuietly(writtenPaths);
+      // เก็บกวาดแบบไม่โยนทับ error ตัวจริง และไม่ลบไฟล์ที่คำขออื่นจองไปแล้ว (TAX-01)
+      await this.cleanupWrittenFiles(
+        writtenPaths,
+        documentRows.map((row) => row.relativePath)
+      );
+
+      if (this.isDuplicateKeyError(error)) {
+        return {
+          ok: false,
+          status: StatusCodes.CONFLICT,
+          error: 'TAX_DOCUMENT_ALREADY_EXISTS'
+        } as const;
+      }
+
       throw error;
     }
   }
@@ -880,6 +902,42 @@ export class TaxService {
    *
    * ไฟล์ที่ไม่มีอยู่แล้ว (ENOENT) นับเป็นสำเร็จ เพราะผลลัพธ์ที่ต้องการคือ "ไม่มีไฟล์นี้"
    */
+  /**
+   * TAX-01 เก็บกวาดไฟล์หลังอัปโหลดล้มเหลว โดยไม่แตะไฟล์ที่คำขออื่นจองไปแล้ว
+   *
+   * สองคำขอที่อัปโหลดของคนเดียวกันปีเดียวกันพร้อมกัน จะคำนวณ file_no ได้เท่ากัน
+   * เพราะต่างฝ่ายต่างอ่าน max ก่อนอีกฝ่ายจะ insert จึงเขียนไฟล์ทับ path เดียวกัน
+   * ฝ่ายที่ insert ทีหลังจะชน UNIQUE (year_be, cid, file_no) แล้วเข้ามาเก็บกวาด
+   *
+   * ถ้าลบตรง ๆ จะลบไฟล์ที่แถวของฝ่ายที่สำเร็จชี้อยู่ กลายเป็นแถวที่ไฟล์หาย
+   * จึงต้องถามฐานก่อนว่า path ไหนมีแถวอ้างถึงแล้วบ้าง แล้วเว้นไว้
+   */
+  private async cleanupWrittenFiles(writtenPaths: string[], relativePaths: string[]) {
+    let referenced = new Set<string>();
+    try {
+      referenced = await this.model.findReferencedPaths(relativePaths);
+    } catch (error) {
+      // ถามฐานไม่ได้ก็ไม่ลบอะไรเลย ปลอดภัยกว่าการลบของคนอื่นทิ้ง
+      console.error('[tax] ตรวจไฟล์ที่ถูกอ้างถึงไม่ได้ จึงไม่เก็บกวาดไฟล์', error);
+      return;
+    }
+
+    const safeToRemove = writtenPaths.filter((_, index) => !referenced.has(relativePaths[index]));
+    const skipped = writtenPaths.length - safeToRemove.length;
+    if (skipped > 0) {
+      console.error(`[tax] ข้ามการลบไฟล์ ${skipped} ไฟล์ เพราะมีแถวอื่นอ้างถึงแล้ว`);
+    }
+
+    await this.removeFilesQuietly(safeToRemove);
+  }
+
+  /** MySQL/NDB คืน ER_DUP_ENTRY เมื่อชน UNIQUE (year_be, cid, file_no) */
+  private isDuplicateKeyError(error: unknown): boolean {
+    const code = (error as any)?.code;
+    const errno = Number((error as any)?.errno);
+    return code === 'ER_DUP_ENTRY' || errno === 1062;
+  }
+
   private async removeFilesQuietly(absolutePaths: string[]) {
     const targets = absolutePaths.filter((item) => Boolean(item));
 
@@ -968,29 +1026,48 @@ export class TaxService {
     return { ok: true, hospcode: office.code5 } as const;
   }
 
+  /**
+   * TAX-08 ช่วงปีที่ยอมรับต้องแคบพอจะกันการพิมพ์ผิด
+   *
+   * เดิมยอมรับ 2400-2700 และแปลง 0-99 เป็น 2500+n
+   * พิมพ์เลข 0 จึงได้ปี 2500 ซึ่งผ่าน validation ไปได้
+   * นั่นคือต้นเหตุของ TAX-12 ที่ทำให้เอกสาร 1,228 แถวติดอยู่ที่ปี 2500
+   * และยังเคยมีคนสร้างปี 2599 เป็นปีทดสอบค้างไว้ในระบบจริงด้วย
+   *
+   * เปลี่ยนเป็นหน้าต่างรอบปีปัจจุบัน คิดจากนาฬิกาเครื่องทุกครั้ง
+   * ไม่ฝังตัวเลขตายตัวเพราะจะกลายเป็นของเก่าในอีกไม่กี่ปี
+   *
+   * ล่วงหน้าได้ 1 ปี เผื่อออกใบช่วงต้นปีก่อนปีภาษีจบ
+   * ย้อนหลังได้ 20 ปี เผื่อนำของเก่าเข้าระบบ ซึ่งตอนนี้ย้อนไปไกลสุดแค่ 3 ปี
+   */
+  private static readonly YEAR_BE_YEARS_BACK = 20;
+  private static readonly YEAR_BE_YEARS_AHEAD = 1;
+
+  private yearBeRange() {
+    const currentYearBe = new Date().getFullYear() + 543;
+    return {
+      min: currentYearBe - TaxService.YEAR_BE_YEARS_BACK,
+      max: currentYearBe + TaxService.YEAR_BE_YEARS_AHEAD
+    };
+  }
+
   private normalizeYearBe(rawYear: number) {
     const year = Number(rawYear);
-    if (!Number.isInteger(year)) {
-      return {
-        ok: false,
-        status: StatusCodes.BAD_REQUEST,
-        error: 'INVALID_YEAR_BE'
-      } as const;
-    }
-
-    if (year >= 2400 && year <= 2700) {
-      return { ok: true, yearBe: year } as const;
-    }
-
-    if (year >= 0 && year <= 99) {
-      return { ok: true, yearBe: 2500 + year } as const;
-    }
-
-    return {
+    const invalid = {
       ok: false,
       status: StatusCodes.BAD_REQUEST,
       error: 'INVALID_YEAR_BE'
     } as const;
+
+    if (!Number.isInteger(year)) return invalid;
+
+    // สองหลักคือการพิมพ์ย่อของปี 25xx เช่น 68 หมายถึง 2568
+    const yearBe = year >= 0 && year <= 99 ? 2500 + year : year;
+
+    const { min, max } = this.yearBeRange();
+    if (yearBe < min || yearBe > max) return invalid;
+
+    return { ok: true, yearBe } as const;
   }
 
   private toYearShort(yearBe: number) {

@@ -6,6 +6,8 @@ declare global {
       auth?: AuthContext;
       requestId?: string;
       effectiveHospcodes?: string[];
+      /** OBS-01 ชื่อ error ที่ errorMiddleware จับได้ ให้ audit บันทึกต่อ */
+      errorName?: string;
     }
   }
 }
