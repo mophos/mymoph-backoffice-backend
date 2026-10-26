@@ -4,7 +4,8 @@ import { TaxService } from '../tax.service';
 import type { AuthContext } from '../../../shared/types/auth';
 
 /**
- * เทสต์ TAX-04: รหัสหน่วยงานที่สร้างปีภาษีต้องถูกแปลงเป็น code5 ก่อนบันทึกเสมอ
+ * เทสต์ TAX-04 + H-01: รหัสหน่วยงานที่สร้างปีภาษีต้องถูกแปลงเป็นรหัสอ้างอิงก่อนบันทึกเสมอ
+ * รหัสอ้างอิง = code5 ถ้ามี · ไม่มีก็ hcode9
  *
  * รหัสนี้ไม่ได้ลงแค่ในฐาน แต่กลายเป็นชื่อโฟลเดอร์ที่เก็บไฟล์ด้วย
  * (buildRelativePath -> yearShort/hospcode/fileName) การปล่อยค่าดิบผ่านไป
@@ -89,13 +90,57 @@ describe('TAX-04 แปลงรหัสหน่วยงานก่อนส
     assert.equal(calls.createdHospcode, null);
   });
 
-  test('หน่วยงานที่ไม่มี code5 ต้องถูกปฏิเสธอย่างชัดเจน', async () => {
+  /**
+   * H-01 เปลี่ยนเจตนาเมื่อ 26 ต.ค. 2569
+   *
+   * เดิมเทสต์นี้ยืนยันว่าต้องปฏิเสธ โดยให้เหตุผลว่าจะได้โฟลเดอร์ชื่อ CA0002583 บนดิสก์
+   * ซึ่งตอนนั้นถือว่าเป็นปัญหา เพราะขอบเขตผู้ใช้เก็บเป็น code5 อย่างเดียว
+   * ปีภาษีที่เก็บ hcode9 จึงไม่มีใครมองเห็น
+   *
+   * ตอนนี้ขอบเขตก็ใช้รหัสอ้างอิงแบบเดียวกัน โฟลเดอร์ชื่อ CA0002583 จึงถูกต้องแล้ว
+   * และเป็นทางเดียวที่หน่วยงาน 3,230 แห่งซึ่งไม่มี code5 จะใช้เมนูนี้ได้
+   */
+  test('หน่วยงานที่ไม่มี code5 ต้องสร้างปีภาษีได้ โดยใช้ hcode9 เป็นรหัสอ้างอิง', async () => {
     const calls: Calls = { createdHospcode: null };
     const result = await makeService(calls).createYear(globalActor, { yearBe: 2569, hospcode: 'CA0002583' });
 
+    assert.equal(result.ok, true, 'ต้องไม่ถูกปฏิเสธอีกแล้ว');
+    assert.equal(calls.createdHospcode, 'CA0002583', 'เก็บ hcode9 เป็นรหัสของปีภาษี');
+  });
+
+  test('หน่วยงานที่มี code5 ต้องยังเก็บ code5 เหมือนเดิม ไม่เปลี่ยนไปใช้ hcode9', async () => {
+    const calls: Calls = { createdHospcode: null };
+    const result = await makeService(calls).createYear(globalActor, { yearBe: 2569, hospcode: 'IA0041124' });
+
+    assert.equal(result.ok, true);
+    assert.equal(calls.createdHospcode, '41124', 'ของเดิมต้องไม่ถดถอย');
+  });
+
+  test('ผู้ใช้ที่มีขอบเขตเป็น hcode9 สร้างปีของหน่วยงานตัวเองได้', async () => {
+    const calls: Calls = { createdHospcode: null };
+    const actor: AuthContext = { ...globalActor, roles: ['hr'], hospcodes: ['CA0002583'], scopeType: 'LIST' };
+    const result = await makeService(calls).createYear(actor, { yearBe: 2569, hospcode: 'CA0002583' });
+
+    assert.equal(result.ok, true);
+    assert.equal(calls.createdHospcode, 'CA0002583');
+  });
+
+  test('ผู้ใช้ที่มีขอบเขตเป็น hcode9 สร้างปีของหน่วยงานอื่นไม่ได้', async () => {
+    const calls: Calls = { createdHospcode: null };
+    const actor: AuthContext = { ...globalActor, roles: ['hr'], hospcodes: ['CA0002583'], scopeType: 'LIST' };
+    const result = await makeService(calls).createYear(actor, { yearBe: 2569, hospcode: '41124' });
+
     assert.equal(result.ok, false);
-    assert.equal((result as { error: string }).error, 'OFFICE_WITHOUT_CODE5');
-    assert.equal(calls.createdHospcode, null, 'ไม่งั้นจะได้โฟลเดอร์ชื่อ CA0002583 บนดิสก์');
+    assert.equal(calls.createdHospcode, null);
+  });
+
+  test('ไม่ระบุรหัส และมีขอบเขต hcode9 หน่วยงานเดียว ให้ใช้ของตัวเอง', async () => {
+    const calls: Calls = { createdHospcode: null };
+    const actor: AuthContext = { ...globalActor, roles: ['hr'], hospcodes: ['CA0002583'], scopeType: 'LIST' };
+    const result = await makeService(calls).createYear(actor, { yearBe: 2569 });
+
+    assert.equal(result.ok, true);
+    assert.equal(calls.createdHospcode, 'CA0002583');
   });
 
   test('ไม่ระบุรหัสและมีขอบเขตหน่วยงานเดียว ให้ใช้ของตัวเอง', async () => {

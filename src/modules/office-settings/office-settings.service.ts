@@ -1,6 +1,7 @@
 import { StatusCodes } from 'http-status-codes';
 import type { AuthContext } from '../../shared/types/auth';
 import { OfficeSettingsModel } from './office-settings.model';
+import { officeReferenceCode } from '../../shared/services/hcode-bridge.service';
 
 export class OfficeSettingsService {
   constructor(private readonly model: OfficeSettingsModel) {}
@@ -37,7 +38,7 @@ export class OfficeSettingsService {
       return { ok: false as const, status: StatusCodes.NOT_FOUND, error: 'HOSPCODE_NOT_FOUND' };
     }
 
-    const scopeCheck = this.validateScope(auth, office.code5);
+    const scopeCheck = this.validateScope(auth, office);
     if (!scopeCheck.ok) return scopeCheck;
 
     try {
@@ -61,15 +62,16 @@ export class OfficeSettingsService {
     }
   }
 
-  private validateScope(auth: AuthContext, code5: string | null) {
+  private validateScope(auth: AuthContext, office: { code5: string | null; hcode9: string }) {
     if (auth.scopeType === 'ALL') return { ok: true as const };
 
     /*
-     * ขอบเขตของผู้ใช้ยังเก็บเป็น code5 หน่วยงานที่ไม่มีรหัสนั้นจึงไม่มีทางอยู่ใน
-     * ขอบเขตของใครได้เลย มีเพียงผู้ที่มีขอบเขตทุกหน่วยงานที่เปิดให้ได้
-     * เมื่อ migration เปลี่ยนขอบเขตไปเก็บ hcode9 แล้วข้อจำกัดนี้จะหายไปเอง
+     * ขอบเขตเก็บเป็น "รหัสอ้างอิง" คือ code5 ถ้ามี ไม่มีก็ hcode9 (H-01)
+     *
+     * คอมเมนต์เดิมตรงนี้เขียนไว้ว่าหน่วยงานที่ไม่มี code5 จะไม่มีทางอยู่ในขอบเขตของใคร
+     * และข้อจำกัดจะหายไปเองเมื่อขอบเขตเปลี่ยนไปเก็บ hcode9 — ซึ่งเกิดขึ้นแล้ว
      */
-    if (!code5 || !auth.hospcodes.includes(code5)) {
+    if (!auth.hospcodes.includes(officeReferenceCode(office))) {
       return { ok: false as const, status: StatusCodes.FORBIDDEN, error: 'SCOPE_FORBIDDEN' };
     }
 

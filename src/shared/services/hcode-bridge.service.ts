@@ -3,6 +3,30 @@ import type { Knex } from 'knex';
 export const HCODE_TABLE = 'hcode_health_office';
 
 /**
+ * รหัสที่ใช้อ้างอิงหน่วยงานในคอลัมน์ `hospcode` ทั่วระบบ
+ *
+ * ```
+ * รหัสอ้างอิง = code5 ถ้ามี · ถ้าไม่มีใช้ hcode9
+ * ```
+ *
+ * หน่วยงาน 3,230 แห่งที่ยังเปิดใช้งานไม่มี code5 ส่วนใหญ่เป็นคลินิกเอกชน
+ * ถ้ายืนยันว่าต้องมี code5 คนของหน่วยงานเหล่านั้นจะไม่มีทางได้รับขอบเขตเลย
+ *
+ * คอลัมน์ `hospcode` ของ `user_office_scope`, `tax_years`, `tax_documents`
+ * เป็น `varchar(10) NOT NULL` จึงรับ hcode9 (9 ตัว) ได้โดยไม่ต้องแก้โครงตาราง
+ * และเพราะค่าที่เก็บกับค่าที่เทียบเป็นรูปแบบเดียวกัน `validateScope`
+ * กับ `whereIn('hospcode', ...)` จึงทำงานได้โดยไม่ต้องแก้
+ *
+ * **ผลข้างเคียงที่ยอมรับไว้** คอลัมน์นี้จะมีรหัสสองรูปแบบปนกัน
+ * ห้าม `JOIN hcode_health_office ON code5 = hospcode` ตรง ๆ เพราะจะได้ผลไม่ครบ
+ * ให้ใช้ `resolveOfficeCode(s)` ซึ่งรับทั้งสองแบบแทน
+ *
+ * ดู work-list/work-hcode9/02-DECISIONS.md หัวข้อ H-01
+ */
+export const officeReferenceCode = (office: { code5: string | null; hcode9: string }): string =>
+  office.code5?.trim() || String(office.hcode9).trim();
+
+/**
  * ตัวแปลงรหัสสถานพยาบาลระหว่างมาตรฐานเก่า (code5) กับใหม่ (hcode9)
  *
  * มาตรฐานกลางกำลังย้ายจาก code5 ไป hcode9 แต่ระบบในเครืออัปเดตพร้อมกันไม่ได้

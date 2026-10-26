@@ -4,6 +4,7 @@ import { StatusCodes } from 'http-status-codes';
 import { PDFDocument } from 'pdf-lib';
 import type { AuthContext } from '../../shared/types/auth';
 import { TaxModel, type InsertTaxDocumentDeleteLogRow, type InsertTaxDocumentRow } from './tax.model';
+import { officeReferenceCode } from '../../shared/services/hcode-bridge.service';
 
 interface PaginationQuery {
   search?: string;
@@ -980,14 +981,17 @@ export class TaxService {
   }
 
   /**
-   * หารหัสหน่วยงานที่จะใช้สร้างปีภาษี แล้วตรวจสิทธิ์ด้วยรหัส 5 หลักเสมอ
+   * หารหัสหน่วยงานที่จะใช้สร้างปีภาษี แล้วตรวจสิทธิ์ด้วย "รหัสอ้างอิง" เสมอ
    *
-   * ต้องแปลงก่อนตรวจสิทธิ์ เพราะขอบเขตของผู้ใช้เก็บเป็น code5
-   * ถ้าเอา hcode9 ที่ส่งมาไปเทียบตรง ๆ จะถูกปฏิเสธทั้งที่เป็นหน่วยงานเดียวกัน
+   * รหัสอ้างอิง = code5 ถ้ามี · ไม่มีก็ hcode9 (H-01)
+   *
+   * ต้องแปลงก่อนตรวจสิทธิ์ เพราะขอบเขตของผู้ใช้ก็เก็บด้วยรหัสอ้างอิงเดียวกัน
+   * ถ้าเอาค่าที่ผู้ใช้ส่งมาไปเทียบตรง ๆ จะถูกปฏิเสธทั้งที่เป็นหน่วยงานเดียวกัน
+   * เช่นส่ง hcode9 มาแต่ขอบเขตเก็บเป็น code5
    *
    * และต้องคืนค่าที่ normalize แล้วให้ผู้เรียกเสมอ เพราะรหัสนี้ถูกเอาไปใช้
    * ทั้งเป็นค่าในฐานและ **ชื่อโฟลเดอร์ที่เก็บไฟล์** (ดู buildRelativePath)
-   * ถ้าปล่อยค่าดิบผ่านไป ที่เก็บไฟล์จะมีโฟลเดอร์ปนสองรูปแบบ
+   * ถ้าปล่อยค่าดิบผ่านไป ที่เก็บไฟล์จะมีโฟลเดอร์ปนสองรูปแบบของหน่วยงานเดียวกัน
    */
   private async resolveHospcodeForCreate(auth: AuthContext, rawHospcode?: string) {
     const raw = String(rawHospcode ?? '').trim();
@@ -1009,21 +1013,20 @@ export class TaxService {
       return { ok: false, status: StatusCodes.BAD_REQUEST, error: 'HOSPCODE_NOT_FOUND' } as const;
     }
 
-    // ไม่มี code5 = อ้างอิงได้ด้วย hcode9 อย่างเดียว ซึ่งยังใช้เป็นขอบเขตผู้ใช้
-    // และชื่อโฟลเดอร์ไม่ได้ จึงยังสร้างปีภาษีให้ไม่ได้
-    if (!office.code5) {
-      return {
-        ok: false,
-        status: StatusCodes.BAD_REQUEST,
-        error: 'OFFICE_WITHOUT_CODE5',
-        message: 'หน่วยงานนี้ยังไม่มีรหัส 5 หลัก จึงยังสร้างปีภาษีไม่ได้'
-      } as const;
-    }
+    // หน่วยงานที่ไม่มี code5 ใช้ hcode9 เป็นรหัสอ้างอิง (H-01)
+    //
+    // เดิมปฏิเสธด้วย OFFICE_WITHOUT_CODE5 โดยให้เหตุผลว่าใช้เป็นชื่อโฟลเดอร์ไม่ได้
+    // ซึ่งไม่จริง hcode9 เป็นชื่อโฟลเดอร์ที่ใช้ได้ปกติ และคอลัมน์ hospcode
+    // ของ tax_years กับ tax_documents เป็น varchar(10) จึงรับ 9 ตัวอักษรได้
+    //
+    // ค่าที่คืนไปถูกใช้ทั้งเป็นค่าในฐานและชื่อโฟลเดอร์ (ดู buildRelativePath)
+    // จึงต้องเป็นรหัสเดียวกับที่ขอบเขตผู้ใช้เก็บไว้ ไม่งั้นจะเทียบกันไม่ติด
+    const hospcode = officeReferenceCode(office);
 
-    const scopeValidation = this.validateScope(auth, office.code5);
+    const scopeValidation = this.validateScope(auth, hospcode);
     if (!scopeValidation.ok) return scopeValidation;
 
-    return { ok: true, hospcode: office.code5 } as const;
+    return { ok: true, hospcode } as const;
   }
 
   /**
