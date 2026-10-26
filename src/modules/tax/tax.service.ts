@@ -162,17 +162,23 @@ export class TaxService {
 
     const documentPaths = await this.model.hardDeleteYearDocumentsAndDeactivateYear(yearId, auth.userId);
 
-    await Promise.all(
-      documentPaths.map(async (relativePath) => {
-        const normalizedRelativePath = String(relativePath || '');
-        if (!normalizedRelativePath) return;
-
-        const filePath = this.resolveStoragePath(normalizedRelativePath);
-        await this.removeFileIfExists(filePath);
-      })
+    // ฐาน commit ไปแล้วตรงนี้ การลบไฟล์จึงห้ามทำให้คำขอล้มเหลว (TAX-16)
+    const cleanup = await this.removeFilesQuietly(
+      documentPaths
+        .map((relativePath) => String(relativePath || ''))
+        .filter((relativePath) => relativePath.length > 0)
+        .map((relativePath) => this.resolveStoragePath(relativePath))
     );
 
-    return { ok: true, status: StatusCodes.OK };
+    return {
+      ok: true,
+      status: StatusCodes.OK,
+      data: {
+        documentsDeleted: documentPaths.length,
+        filesRemoved: cleanup.removed,
+        filesFailed: cleanup.failed.length
+      }
+    };
   }
 
   async listDocuments(auth: AuthContext, yearId: number, query: PaginationQuery) {
@@ -268,7 +274,9 @@ export class TaxService {
         }
       };
     } catch (error) {
-      await Promise.all(writtenPaths.map((filePath) => this.removeFileIfExists(filePath)));
+      // เก็บกวาดแบบไม่โยนทับ error ตัวจริง ไม่งั้นสาเหตุเดิมจะหายไป
+      // และไฟล์ที่เหลือในคิวจะไม่ถูกลบต่อ
+      await this.removeFilesQuietly(writtenPaths);
       throw error;
     }
   }
@@ -364,7 +372,9 @@ export class TaxService {
         }
       };
     } catch (error) {
-      await Promise.all(writtenPaths.map((filePath) => this.removeFileIfExists(filePath)));
+      // เก็บกวาดแบบไม่โยนทับ error ตัวจริง ไม่งั้นสาเหตุเดิมจะหายไป
+      // และไฟล์ที่เหลือในคิวจะไม่ถูกลบต่อ
+      await this.removeFilesQuietly(writtenPaths);
       throw error;
     }
   }
@@ -539,8 +549,11 @@ export class TaxService {
 
     await this.writeBufferToStorage(nextAbsolutePath, sourceBuffer);
 
+    // หมายเหตุ ลำดับตรงนี้ยังไม่ถูกนัก คือลบไฟล์เดิมก่อนอัปเดตแถว
+    // แต่ route นี้ถูกปิดด้วย 403 TAX_DOCUMENT_EDIT_DISABLED อยู่แล้ว จึงยังไม่รื้อ
+    // ที่แก้คือไม่ให้การลบไฟล์เดิมล้มเหลวแล้วทำให้ทั้งคำขอพัง
     if (currentAbsolutePath !== nextAbsolutePath) {
-      await this.removeFileIfExists(currentAbsolutePath);
+      await this.removeFilesQuietly([currentAbsolutePath]);
     }
 
     await this.model.updateDocument(documentId, {
@@ -583,10 +596,15 @@ export class TaxService {
 
     await this.model.hardDeleteDocumentWithLog(logInput);
 
+    // ฐาน commit ไปแล้ว ลบไฟล์ไม่สำเร็จก็ยังถือว่าคำขอสำเร็จ (TAX-02)
     const absolutePath = this.resolveStoragePath(String(doc.relative_path));
-    await this.removeFileIfExists(absolutePath);
+    const cleanup = await this.removeFilesQuietly([absolutePath]);
 
-    return { ok: true, status: StatusCodes.OK };
+    return {
+      ok: true,
+      status: StatusCodes.OK,
+      data: { fileRemoved: cleanup.failed.length === 0 }
+    };
   }
 
   async getDownloadPayload(auth: AuthContext, documentId: string) {
@@ -847,14 +865,44 @@ export class TaxService {
     await fs.writeFile(absolutePath, buffer);
   }
 
-  private async removeFileIfExists(absolutePath: string) {
-    try {
-      await fs.unlink(absolutePath);
-    } catch (error: any) {
-      if (error?.code !== 'ENOENT') {
-        throw error;
-      }
-    }
+  /**
+   * ลบไฟล์โดยไม่ทำให้คำขอล้มเหลว — TAX-02 / TAX-16
+   *
+   * ใช้ในจุดที่ฐานถูก commit ไปแล้ว ตอนนั้นงานสำเร็จจากมุมของผู้ใช้แล้ว
+   * ถ้าปล่อยให้การลบไฟล์โยน error ออกไปจะเกิดสองอย่างพร้อมกัน
+   *   1. ผู้ใช้ได้ 500 ทั้งที่ข้อมูลถูกลบจริง กดซ้ำก็จะเจอ NOT_FOUND
+   *   2. ไฟล์ที่เหลือในคิวไม่ถูกลบต่อ กลายเป็นไฟล์ค้างที่ไม่มีใครรู้
+   *
+   * ไฟล์ค้าง 2,072 ไฟล์ที่พบเมื่อ 16 ต.ค. 2569 เป็นผลของรูปแบบนี้
+   *
+   * ไฟล์ที่ลบไม่สำเร็จยังตามเก็บทีหลังได้ เพราะ `tax_document_delete_logs`
+   * เก็บ `relative_path` ไว้ครบ และ `npm run tax:audit` หาไฟล์ที่ไม่มีแถวอ้างถึงได้
+   *
+   * ไฟล์ที่ไม่มีอยู่แล้ว (ENOENT) นับเป็นสำเร็จ เพราะผลลัพธ์ที่ต้องการคือ "ไม่มีไฟล์นี้"
+   */
+  private async removeFilesQuietly(absolutePaths: string[]) {
+    const targets = absolutePaths.filter((item) => Boolean(item));
+
+    const results = await Promise.allSettled(
+      targets.map(async (absolutePath) => {
+        try {
+          await fs.unlink(absolutePath);
+        } catch (error: any) {
+          if (error?.code === 'ENOENT') return;
+          throw error;
+        }
+      })
+    );
+
+    const failed: string[] = [];
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') return;
+      const reason: any = result.reason;
+      failed.push(targets[index]);
+      console.error('[tax] ลบไฟล์ไม่สำเร็จ', targets[index], reason?.code ?? reason?.message ?? reason);
+    });
+
+    return { removed: targets.length - failed.length, failed };
   }
 
   private validateScope(auth: AuthContext, hospcode: string) {
