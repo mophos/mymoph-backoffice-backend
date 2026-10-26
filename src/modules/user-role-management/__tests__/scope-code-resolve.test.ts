@@ -93,12 +93,50 @@ describe('SCOPE-01 แปลงรหัสก่อนบันทึกขอ�
     assert.deepEqual((result as { missingHospcodes: string[] }).missingHospcodes, ['99999']);
   });
 
-  test('หน่วยงานที่ไม่มี code5 ต้องถูกปฏิเสธอย่างชัดเจน ไม่ใช่บันทึกแถวที่กรองไม่เจอ', async () => {
+  /**
+   * H-01 เปลี่ยนเจตนาเมื่อ 26 ต.ค. 2569
+   *
+   * เดิมเทสต์นี้ยืนยันว่าต้องปฏิเสธ เพราะขอบเขตบันทึกเป็น code5 อย่างเดียว
+   * การเขียน hcode9 ลงไปจึงกลายเป็นแถวที่ทุกโมดูลกรองไม่เจอ
+   *
+   * ตอนนี้ระบบใช้ "รหัสอ้างอิง" คือ code5 ถ้ามี ไม่มีก็ hcode9 ทั้งตอนเก็บและตอนเทียบ
+   * แถวจึงถูกกรองเจอตามปกติ และหน่วยงาน 3,230 แห่งที่ไม่มี code5 ใช้งานได้
+   */
+  test('หน่วยงานที่ไม่มี code5 ต้องบันทึกได้ โดยใช้ hcode9 เป็นรหัสอ้างอิง', async () => {
     const calls: Calls = { savedOffices: null };
     const result = await makeService(calls).create(globalActor, payload(['CA0002583']));
 
+    assert.equal(result.ok, true, 'ต้องไม่ถูกปฏิเสธอีกแล้ว');
+    assert.equal(calls.savedOffices?.length, 1, 'ต้องมีหน่วยงานส่งไปบันทึกจริง ไม่ใช่ตกหล่นเงียบ ๆ');
+    assert.equal(calls.savedOffices?.[0].hcode9, 'CA0002583');
+    assert.equal(calls.savedOffices?.[0].code5, null);
+  });
+
+  test('ผสมหน่วยงานที่มีและไม่มี code5 ในคำขอเดียว ต้องได้ครบทั้งสอง', async () => {
+    const calls: Calls = { savedOffices: null };
+    const result = await makeService(calls).create(globalActor, payload(['41124', 'CA0002583']));
+
+    assert.equal(result.ok, true);
+    assert.equal(calls.savedOffices?.length, 2, 'ต้องไม่มีแถวไหนตกหล่น');
+    const codes = calls.savedOffices!.map((o) => o.code5 ?? o.hcode9).sort();
+    assert.deepEqual(codes, ['41124', 'CA0002583'].sort());
+  });
+
+  test('ผู้ดูแลที่มีขอบเขตเป็น hcode9 มอบหน่วยงานของตัวเองได้', async () => {
+    const calls: Calls = { savedOffices: null };
+    const actor: AuthContext = { ...globalActor, roles: ['hr'], hospcodes: ['CA0002583'], scopeType: 'LIST' };
+    const result = await makeService(calls).create(actor, payload(['CA0002583']));
+
+    assert.equal(result.ok, true, 'ขอบเขต hcode9 ต้องเทียบกับรหัสอ้างอิงได้');
+  });
+
+  test('ผู้ดูแลที่มีขอบเขตเป็น hcode9 มอบหน่วยงานอื่นไม่ได้', async () => {
+    const calls: Calls = { savedOffices: null };
+    const actor: AuthContext = { ...globalActor, roles: ['hr'], hospcodes: ['CA0002583'], scopeType: 'LIST' };
+    const result = await makeService(calls).create(actor, payload(['41124']));
+
     assert.equal(result.ok, false);
-    assert.equal((result as { error: string }).error, 'OFFICE_WITHOUT_CODE5');
+    assert.equal((result as { error: string }).error, 'TARGET_SCOPE_OUT_OF_BOUND');
     assert.equal(calls.savedOffices, null);
   });
 

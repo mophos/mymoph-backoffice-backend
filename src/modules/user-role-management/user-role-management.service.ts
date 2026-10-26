@@ -1,6 +1,7 @@
 import { StatusCodes } from 'http-status-codes';
 import type { AuthContext } from '../../shared/types/auth';
 import { UserRoleManagementModel, type OfficeCode } from './user-role-management.model';
+import { officeReferenceCode } from '../../shared/services/hcode-bridge.service';
 
 /** รูปแบบผลลัพธ์เมื่อการตรวจขอบเขตไม่ผ่าน ใช้ส่งกลับเป็น response ได้ตรง ๆ */
 interface ScopeError {
@@ -365,7 +366,7 @@ export class UserRoleManagementService {
   /**
    * แปลงรหัสที่รับเข้ามาเป็นคู่ code5/hcode9 แล้วตรวจสิทธิ์ด้วย code5
    *
-   * ต้องแปลงก่อนตรวจสิทธิ์ เพราะขอบเขตของผู้กระทำเก็บเป็น code5
+   * ต้องแปลงก่อนตรวจสิทธิ์ เพราะขอบเขตของผู้กระทำเก็บเป็นรหัสอ้างอิง (code5 ถ้ามี ไม่มีก็ hcode9)
    * ถ้าเอา hcode9 ที่ส่งมาไปเทียบตรง ๆ จะถูกปฏิเสธทั้งที่เป็นหน่วยงานเดียวกัน
    *
    * เดิมตรวจแค่ว่ารหัสมีอยู่ในทะเบียนไหม แล้วเขียนค่าที่รับมาลงฐานดิบ ๆ
@@ -393,21 +394,11 @@ export class UserRoleManagementService {
 
     const offices = requested.map((code) => resolved.get(code)!);
 
-    // ขอบเขตยังบันทึกเป็น code5 หน่วยงานที่ไม่มีรหัสนั้นจึงยังมอบหมายไม่ได้
-    // ปฏิเสธให้ชัดดีกว่าเขียนแถวที่ทุกโมดูลกรองไม่เจอ
-    const withoutCode5 = offices.filter((office) => !office.code5).map((office) => office.hcode9);
-    if (withoutCode5.length) {
-      return {
-        ok: false,
-        status: StatusCodes.BAD_REQUEST,
-        error: 'OFFICE_WITHOUT_CODE5',
-        missingHospcodes: withoutCode5,
-        message: 'หน่วยงานนี้ยังไม่มีรหัส 5 หลัก จึงยังมอบหมายผู้ดูแลไม่ได้'
-      };
-    }
-
-    const code5List = offices.map((office) => office.code5 as string);
-    const validation = this.validateScope(actor, code5List, roleCodes);
+    // หน่วยงานที่ไม่มี code5 ใช้ hcode9 เป็นรหัสอ้างอิงแทน (H-01)
+    // เดิมปฏิเสธด้วย OFFICE_WITHOUT_CODE5 ซึ่งทำให้คนของหน่วยงาน 3,230 แห่ง
+    // ไม่มีทางได้รับขอบเขตเลย แม้ผู้ดูแลจะตั้งใจมอบให้ก็ตาม
+    const referenceCodes = offices.map((office) => officeReferenceCode(office));
+    const validation = this.validateScope(actor, referenceCodes, roleCodes);
     if (!validation.ok) return validation as ScopeError;
 
     return { ok: true, offices };

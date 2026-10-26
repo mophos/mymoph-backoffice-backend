@@ -1,6 +1,6 @@
 import type { Knex } from 'knex';
 import { v4 as uuidv4 } from 'uuid';
-import { HCODE_TABLE } from '../../shared/services/hcode-bridge.service';
+import { HCODE_TABLE, officeReferenceCode } from '../../shared/services/hcode-bridge.service';
 
 /** คู่รหัสของหน่วยงานหนึ่งแห่งตามทะเบียนกลาง */
 export interface OfficeCode {
@@ -386,11 +386,18 @@ export class UserRoleManagementModel {
   async replaceUserScopes(input: { userId: string; offices: OfficeCode[]; updatedBy?: string }) {
     const meta = await this.getScopeMeta();
 
+    // คีย์ด้วยรหัสอ้างอิง หน่วยงานที่ไม่มี code5 จึงถูกบันทึกด้วย hcode9 แทน (H-01)
+    // เดิมข้ามแถวพวกนี้เงียบ ๆ ทำให้ระบบตอบว่าบันทึกสำเร็จทั้งที่ไม่มีแถวเกิดขึ้น
     const unique = new Map<string, OfficeCode>();
     for (const office of input.offices) {
-      const code5 = office.code5?.trim();
-      if (!code5) continue; // ยังบันทึกหน่วยงานที่ไม่มี code5 ไม่ได้ ผู้เรียกต้องกันไว้ก่อน
-      if (!unique.has(code5)) unique.set(code5, { code5, hcode9: String(office.hcode9).trim() });
+      const reference = officeReferenceCode(office);
+      if (!reference) continue;
+      if (!unique.has(reference)) {
+        unique.set(reference, {
+          code5: office.code5?.trim() || null,
+          hcode9: String(office.hcode9).trim()
+        });
+      }
     }
 
     await this.db.transaction(async (trx) => {
@@ -407,7 +414,7 @@ export class UserRoleManagementModel {
       const rows = [...unique.values()].map((office) => ({
         id: uuidv4(),
         user_id: input.userId,
-        hospcode: office.code5 as string,
+        hospcode: officeReferenceCode(office),
         ...(meta.hasHospcode9 ? { hospcode9: office.hcode9 } : {}),
         is_active: 1,
         created_by: input.updatedBy ?? null,

@@ -41,10 +41,18 @@ export class OfficeSettingsModel {
   async list(input: ListInput) {
     const base = this.db(`${HCODE_TABLE} as h`).where('h.active', 1);
 
-    // คงพฤติกรรมสิทธิ์เดิม: ผู้มี Scope LIST เห็นเฉพาะหน่วยงานที่ตัวเองดูแล
-    // ข้อมูลในระบบยังเก็บ code5 จึงกรองด้วยคอลัมน์นั้น
+    /**
+     * คงพฤติกรรมสิทธิ์เดิม: ผู้มี Scope LIST เห็นเฉพาะหน่วยงานที่ตัวเองดูแล
+     *
+     * ขอบเขตเก็บเป็น "รหัสอ้างอิง" คือ code5 ถ้ามี ไม่มีก็ hcode9 (H-01)
+     * จึงต้องเทียบทั้งสองคอลัมน์ ไม่งั้นผู้ใช้ของหน่วยงานที่ไม่มี code5
+     * จะมองไม่เห็นหน่วยงานตัวเองในหน้านี้
+     */
     if (input.scopeType === 'LIST') {
-      base.whereIn('h.code5', input.hospcodes.length ? input.hospcodes : ['']);
+      const codes = input.hospcodes.length ? input.hospcodes : [''];
+      base.andWhere((builder) => {
+        builder.whereIn('h.code5', codes).orWhereIn('h.hcode9', codes);
+      });
     }
 
     if (input.provinceCode) {
