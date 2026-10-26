@@ -10,6 +10,7 @@
     "start:prod": "npm run build && node dist/server.js",
     "lint": "tsc --noEmit",
     "tax:migrate:legacy": "tsx src/scripts/tax-migrate-legacy.ts",
+    "tax:audit": "tsx src/scripts/tax-audit-files.ts",
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
