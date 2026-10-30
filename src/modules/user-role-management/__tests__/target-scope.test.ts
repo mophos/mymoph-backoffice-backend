@@ -98,12 +98,20 @@ describe('ADMIN-03 update ต้องตรวจขอบเขตของบ
   });
 });
 
+/** ผู้ถือ super_admin_affairs ที่ยังไม่มีสิทธิ์ finance_admin.manage จึงไม่เข้าเกณฑ์ H-07 */
+const financePageOnlyActor = (hospcodes: string[]): AuthContext =>
+  listActor(hospcodes, { permissions: ['user_admin.manage'] as AuthContext['permissions'] });
+
 describe('ADMIN-03 deactivateFinanceAdmin เดิมไม่ตรวจขอบเขตเลย', () => {
-  test('ปฏิเสธเมื่อเป้าหมายอยู่คนละหน่วยงาน', async () => {
+  // เทสต์นี้เคยคาดว่า listActor ถูกปฏิเสธ แต่ H-07 เปิดให้ผู้ดูแลการเงินส่วนกลาง
+  // (super_admin_affairs + finance_admin.manage) ถอนสิทธิ์ข้ามหน่วยได้แล้ว
+  // จึงย้ายมาวัดขอบเขตเดิมด้วยบัญชีที่ยังไม่เข้าเกณฑ์ H-07 แทน
+  // ADMIN-03 ยังคุ้มครองเส้นทางหน้า user-admin ทั่วไปอยู่ ดูเทสต์ update ด้านบน
+  test('ปฏิเสธเมื่อเป้าหมายอยู่คนละหน่วยงานและผู้กระทำไม่เข้าเกณฑ์ H-07', async () => {
     const state: FakeState = { targetScopes: ['99999'], deactivateCalled: false, scopesReplaced: false };
     const service = makeService(state);
 
-    const result = await service.deactivateFinanceAdmin(listActor(['10001']), 'victim-user');
+    const result = await service.deactivateFinanceAdmin(financePageOnlyActor(['10001']), 'victim-user');
 
     assert.equal(result.ok, false);
     assert.equal((result as { error: string }).error, 'TARGET_OUT_OF_SCOPE');

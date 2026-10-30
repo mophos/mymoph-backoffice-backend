@@ -119,22 +119,28 @@ export class UserRoleManagementModel {
     }
 
     // แนบชื่อและ hcode9 จากทะเบียนกลาง เพื่อให้หน้าเว็บแสดงชื่อหน่วยงานแทนรหัสเปล่า
-    // ค่าที่เก็บใน user_office_scope ยังเป็น code5 จึง join ด้วยคอลัมน์นั้น
+    // ค่าที่เก็บใน user_office_scope เป็นรหัสอ้างอิง คือ code5 ถ้ามี ไม่มีก็ hcode9 (H-01)
+    // เดิมค้นด้วย code5 อย่างเดียว ขอบเขตที่เป็น hcode9 จึงไม่เจอแถวในทะเบียน
+    // และหน้าเว็บแสดงรหัสเปล่าโดยไม่มีชื่อหน่วยงาน
     const allHospcodes = [...new Set(scopeRows.map((row) => String(row.hospcode)))];
     const officeRows = allHospcodes.length
       ? await this.db(`${HCODE_TABLE} as h`)
-          .whereIn('h.code5', allHospcodes)
+          .where((builder) => {
+            builder.whereIn('h.code5', allHospcodes).orWhereIn('h.hcode9', allHospcodes);
+          })
           .select('h.code5', 'h.hcode9', 'h.name', 'h.active')
           // code5 ซ้ำได้ 3 คู่ เอาแถวที่ยัง active ไว้ก่อน
           .orderBy([{ column: 'h.active', order: 'desc' }])
       : [];
 
+    // ใส่ทั้งสองรหัสเป็นคีย์ได้ เพราะยืนยันแล้วว่าไม่มี hcode9 ตัวใดชนกับ code5 ของหน่วยงานอื่น
     const officeMap = new Map<string, { code5: string; hcode9: string; name: string }>();
     for (const row of officeRows) {
-      const code5 = String(row.code5).trim();
-      if (!officeMap.has(code5)) {
-        officeMap.set(code5, { code5, hcode9: String(row.hcode9), name: String(row.name ?? '') });
-      }
+      const code5 = row.code5 ? String(row.code5).trim() : '';
+      const hcode9 = String(row.hcode9 ?? '').trim();
+      const entry = { code5, hcode9, name: String(row.name ?? '') };
+      if (code5 && !officeMap.has(code5)) officeMap.set(code5, entry);
+      if (hcode9 && !officeMap.has(hcode9)) officeMap.set(hcode9, entry);
     }
 
     const officesFor = (userId: string) =>
