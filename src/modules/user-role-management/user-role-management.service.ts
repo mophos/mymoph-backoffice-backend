@@ -150,10 +150,12 @@ export class UserRoleManagementService {
       return { ok: false, status: StatusCodes.FORBIDDEN, error: 'FORBIDDEN' };
     }
 
+    // H-08: ผู้ดูแลการเงินส่วนกลางเห็นผู้ดูแลการเงินทุกหน่วยงาน
+    // ถ้าไม่ผ่อนจุดนี้ด้วย จะแต่งตั้งข้ามหน่วยสำเร็จแล้วไม่เห็นคนที่ตัวเองแต่งตั้ง
     const data = await this.model.listHrOfficeAdmins({
       ...query,
       roleCode: FINANCE_ADMIN_ROLE_CODE,
-      actorScopeType: actor.scopeType,
+      actorScopeType: this.canManageAllOffices(actor) ? 'ALL' : actor.scopeType,
       actorHospcodes: actor.hospcodes
     });
 
@@ -165,7 +167,12 @@ export class UserRoleManagementService {
       return { ok: false, status: StatusCodes.FORBIDDEN, error: 'FORBIDDEN' };
     }
 
-    const scopeInput = await this.resolveScopeInput(actor, input.hospcodes, [FINANCE_ADMIN_ROLE_CODE]);
+    const scopeInput = await this.resolveScopeInput(
+      actor,
+      input.hospcodes,
+      [FINANCE_ADMIN_ROLE_CODE],
+      this.canManageAllOffices(actor)
+    );
     if (!scopeInput.ok) return scopeInput;
 
     const role = await this.model.getRoleByCode(FINANCE_ADMIN_ROLE_CODE);
@@ -203,10 +210,17 @@ export class UserRoleManagementService {
       return { ok: false, status: StatusCodes.FORBIDDEN, error: 'FORBIDDEN' };
     }
 
-    const targetCheck = await this.validateTargetInScope(actor, userId);
+    const allowAllOffices = this.canManageAllOffices(actor);
+
+    const targetCheck = await this.validateTargetInScope(actor, userId, allowAllOffices);
     if (!targetCheck.ok) return targetCheck;
 
-    const scopeInput = await this.resolveScopeInput(actor, input.hospcodes, [FINANCE_ADMIN_ROLE_CODE]);
+    const scopeInput = await this.resolveScopeInput(
+      actor,
+      input.hospcodes,
+      [FINANCE_ADMIN_ROLE_CODE],
+      allowAllOffices
+    );
     if (!scopeInput.ok) return scopeInput;
 
     const user = await this.model.getUserById(userId);
@@ -258,7 +272,8 @@ export class UserRoleManagementService {
     }
 
     // เดิมฟังก์ชันนี้ไม่ตรวจขอบเขตของเป้าหมายเลย ตรวจแค่บทบาทของผู้กระทำ
-    const targetCheck = await this.validateTargetInScope(actor, userId);
+    // การถอนใช้ด่านเดียวกับการแก้ไข จึงผ่อนตาม H-07 พร้อมกัน
+    const targetCheck = await this.validateTargetInScope(actor, userId, this.canManageAllOffices(actor));
     if (!targetCheck.ok) return targetCheck;
 
     return this.removeRoles(userId, FINANCE_ADMIN_ROLE_CODE, actor.userId);
@@ -306,8 +321,13 @@ export class UserRoleManagementService {
    * ข้อยกเว้น: บัญชีที่ยังไม่มีขอบเขต active เลย ถือว่ายังไม่มีเจ้าของ จึงมอบหมายได้
    * เพื่อไม่ให้บัญชีที่เพิ่งสร้างหรือถูกปิดไปแล้วกลายเป็นบัญชีที่ไม่มีใครแก้ได้
    */
-  private async validateTargetInScope(actor: AuthContext, userId: string) {
-    if (actor.scopeType === 'ALL') {
+  private async validateTargetInScope(
+    actor: AuthContext,
+    userId: string,
+    allowAllOffices = false
+  ) {
+    // allowAllOffices มาจาก H-07 เส้นทางหน้าการเงินเท่านั้น ค่าปริยายคือกติกาเดิม
+    if (actor.scopeType === 'ALL' || allowAllOffices) {
       return { ok: true } as const;
     }
 
@@ -329,7 +349,12 @@ export class UserRoleManagementService {
     return { ok: true } as const;
   }
 
-  private validateScope(actor: AuthContext, targetHospcodes: string[], roleCodes: string[]) {
+  private validateScope(
+    actor: AuthContext,
+    targetHospcodes: string[],
+    roleCodes: string[],
+    allowAllOffices = false
+  ) {
     if (roleCodes.includes('super_admin') && !actor.permissions.includes('role_admin.manage')) {
       return { ok: false, status: StatusCodes.FORBIDDEN, error: 'ONLY_ROLE_ADMIN_CAN_ASSIGN_SUPER_ADMIN' };
     }
@@ -346,7 +371,9 @@ export class UserRoleManagementService {
       };
     }
 
-    if (actor.scopeType === 'ALL') {
+    // H-07: ผ่อนให้ผู้ดูแลการเงินส่วนกลาง แต่ยังอยู่หลังด่าน HOSPCODES_REQUIRED ข้างบน
+    // การบันทึกโดยไม่ระบุหน่วยงานจึงยังถูกปฏิเสธเหมือนเดิม (ADMIN-04)
+    if (actor.scopeType === 'ALL' || allowAllOffices) {
       return { ok: true };
     }
 
@@ -376,7 +403,8 @@ export class UserRoleManagementService {
   private async resolveScopeInput(
     actor: AuthContext,
     hospcodes: string[],
-    roleCodes: string[]
+    roleCodes: string[],
+    allowAllOffices = false
   ): Promise<{ ok: true; offices: OfficeCode[] } | ScopeError> {
     const requested = [...new Set(hospcodes.map((code) => String(code ?? '').trim()).filter(Boolean))];
 
@@ -398,7 +426,7 @@ export class UserRoleManagementService {
     // เดิมปฏิเสธด้วย OFFICE_WITHOUT_CODE5 ซึ่งทำให้คนของหน่วยงาน 3,230 แห่ง
     // ไม่มีทางได้รับขอบเขตเลย แม้ผู้ดูแลจะตั้งใจมอบให้ก็ตาม
     const referenceCodes = offices.map((office) => officeReferenceCode(office));
-    const validation = this.validateScope(actor, referenceCodes, roleCodes);
+    const validation = this.validateScope(actor, referenceCodes, roleCodes, allowAllOffices);
     if (!validation.ok) return validation as ScopeError;
 
     return { ok: true, offices };
@@ -407,5 +435,24 @@ export class UserRoleManagementService {
 
   private hasFinanceAdminAccess(actor: AuthContext): boolean {
     return actor.roles.includes(FINANCE_PAGE_REQUIRED_ROLE);
+  }
+
+  /**
+   * H-07: ผู้ดูแลการเงินส่วนกลางจัดการผู้ดูแลการเงินได้ทุกหน่วยงาน
+   *
+   * ใช้กฎเดียวกับ D-22 ที่ `tax.service.ts canViewAllOffices` ไม่สร้างกฎใหม่
+   * เพราะบัญชีกลุ่มนี้อ่านข้อมูลภาษีข้ามหน่วยได้อยู่แล้ว การแต่งตั้งที่ยังถูกจำกัด
+   * อยู่แค่ขอบเขตตัวเองจึงเป็นความไม่สอดคล้องกัน ไม่ใช่เส้นแบ่งสิทธิ์ที่ตั้งใจ
+   *
+   * ผลที่ตามมาคือบัญชีกลุ่มนี้แต่งตั้งใครให้หน่วยงานไหนก็ได้ จึงถูกเรียกจาก
+   * เส้นทางของหน้าการเงินเท่านั้น หน้า user-admin ทั่วไปยังจำกัดที่ขอบเขตตัวเองเหมือนเดิม
+   * ไม่เช่นนั้นจะกลายเป็นการเปิดให้แต่งตั้งบทบาทอื่น เช่น hr ข้ามหน่วยได้ด้วย
+   */
+  private canManageAllOffices(actor: AuthContext): boolean {
+    if (actor.scopeType === 'ALL') return true;
+    return (
+      actor.permissions.includes('finance_admin.manage') &&
+      actor.roles.includes(FINANCE_PAGE_REQUIRED_ROLE)
+    );
   }
 }
